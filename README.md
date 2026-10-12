@@ -1,4 +1,6 @@
-# revise <span style="font-style: italic; font-size: 18px; font-weight: normal; margin-left: 12px">The swiss army knife for documents</span>
+# reviseio
+
+The swiss army knife for documents
 
 [![](https://img.shields.io/npm/v/revise)](https://www.npmjs.com/package/revise) [![](https://img.shields.io/badge/read_the-docs-blue)](https://revise.io/developer/docs/revise/cli)
 
