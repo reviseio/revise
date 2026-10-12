@@ -313,6 +313,21 @@ def hermes_command(prompt, args, run_dir):
             "-m", args.model, "--provider", args.provider]
 
 
+# A Mac running the benchmark has the user's apps open. The PATH stubs stop
+# `open` and `osascript` by name, but an agent can call /usr/bin/osascript
+# directly. Under this profile the agent and every process it starts can't
+# open apps, and can't run or copy the tools that script them (AppleScript,
+# Automator, Shortcuts, Swift). `appleevent-send` alone is not enough: tested
+# on macOS 27, osascript still reached a running Finder with only that rule.
+_SCRIPTING_TOOLS = ('(literal "/usr/bin/osascript") (literal "/usr/bin/osacompile") '
+                    '(literal "/usr/bin/automator") (literal "/usr/bin/shortcuts")')
+MACOS_SANDBOX = (
+    "(version 1)(allow default)(deny appleevent-send)(deny lsopen)"
+    f'(deny process-exec {_SCRIPTING_TOOLS} (literal "/usr/bin/open") (regex #"/swiftc?$") (regex #"/swift-frontend$"))'
+    f"(deny file-read* {_SCRIPTING_TOOLS})"
+)
+
+
 def run_claude(command, work, env, args):
     """Headless Claude Code, streamed: the last event is the same result object
     `--output-format json` prints; the events before it are the transcript."""
@@ -443,6 +458,21 @@ def prepare_run(arm, task, n, ctx):
             skills = ".agents/skills" if args.agent == "codex" else ".claude/skills"
             subprocess.run([str(bin_dir / "revise"), "skill", "install", "--dir", skills], cwd=work, env=env,
                            check=True, capture_output=True)
+    # Agents run commands in a login shell (`zsh -lc`), which reads the
+    # user's startup files: on a developer Mac those put nvm's global bin
+    # first, and a globally installed (older) revise shadowed the one under
+    # test. An empty ZDOTDIR keeps the user's zsh files out; then check from
+    # a login shell that `revise` is the right one.
+    zdot = run_dir / "zdotdir"
+    zdot.mkdir()
+    env["ZDOTDIR"] = str(zdot)
+    shell = env.get("SHELL") or "/bin/sh"
+    found = subprocess.run([shell, "-lc", "command -v revise"], cwd=work, env=env,
+                           capture_output=True, text=True).stdout.strip()
+    expected = run_dir / ("bin" if arm == "revise" else "no-gui") / "revise"
+    if found != str(expected):
+        sys.exit(f"[{arm}] {task} #{n}: a login shell ({shell}) finds revise at {found or 'nothing'}, "
+                 f"not {expected}. Something in the shell's startup files reorders PATH.")
     if args.agent == "hermes":
         env["HERMES_HOME"] = str(ctx["hermes_homes"][arm])
         command = hermes_command(prompt, args, run_dir)
@@ -450,6 +480,8 @@ def prepare_run(arm, task, n, ctx):
         command = codex_command(prompt, args, work)
     else:
         command = claude_command(prompt, args, run_dir)
+    if args.macos_sandbox:
+        command = ["sandbox-exec", "-p", MACOS_SANDBOX] + command
     return run_dir, work, env, command
 
 
@@ -575,8 +607,12 @@ def main():
     ap.add_argument("--fixtures-dir", default=str(task_defs.FIXTURES_DIR))
     ap.add_argument("--out", default=None, help="default: bench/out/<agent>")
     ap.add_argument("--dry-run", action="store_true", help="set up work dirs and profiles, print the agent commands")
+    ap.add_argument("--macos-sandbox", action="store_true",
+                    help="run each agent under sandbox-exec with Apple Events and app launches denied (required on macOS)")
     ap.add_argument("--grade-only", action="store_true", help="re-grade existing runs in --out")
     args = ap.parse_args()
+    if sys.platform == "darwin" and not args.macos_sandbox and not (args.grade_only or args.dry_run):
+        sys.exit("On macOS, agents could drive your open apps: run with --macos-sandbox.")
 
     task_defs.set_fixtures_dir(args.fixtures_dir)
     if args.agent == "hermes":
