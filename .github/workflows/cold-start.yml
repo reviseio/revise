@@ -134,8 +134,10 @@ jobs:
           }[os.environ["AGENT"]]
           skills = sorted({str(p) for r in places if r.exists()
                            for p in r.rglob("revise-cli/SKILL.md")})
+          checkout = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
           strays = sorted({str(p) for r in (home, work) if r.exists()
-                           for p in r.rglob("revise-cli/SKILL.md")} - set(skills))
+                           for p in r.rglob("revise-cli/SKILL.md")
+                           if checkout not in p.parents} - set(skills))
           xml = zipfile.ZipFile("contract.docx").read("word/document.xml").decode()
           deleted = re.findall(r"<w:del\b[^>]*w:author=\"([^\"]*)\"[^>]*>(.*?)</w:del>", xml, re.S)
           inserted = re.findall(r"<w:ins\b[^>]*w:author=\"([^\"]*)\"[^>]*>(.*?)</w:ins>", xml, re.S)

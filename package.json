@@ -1,7 +1,7 @@
 {
   "name": "revise",
   "version": "3.1.2",
-  "reviseBuild": "e907aed25",
+  "reviseBuild": "de9af8f41",
   "description": "Read, edit, and redline Word documents from the command line or TypeScript, with tracked changes, comments, and tools for AI agents.",
   "keywords": [
     "docx",
