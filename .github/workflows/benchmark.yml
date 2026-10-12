@@ -1,0 +1,310 @@
+# Runs bench/ (the revise vs. baseline benchmark) on GitHub-hosted runners.
+# Manual dispatch only: this repository is public and the jobs hold agent
+# credentials, so nothing a contributor pushes or opens can start a run.
+# See bench/README.md.
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      agents:
+        description: "Agents, comma-separated: claude, codex, hermes"
+        type: string
+        default: "claude,codex,hermes"
+      models:
+        description: "Models as agent=model, comma-separated (blank: claude=sonnet, codex=gpt-6-sol, hermes=gpt-5.6-terra)"
+        type: string
+        default: ""
+      tasks:
+        description: "Tasks, comma-separated (blank: every task whose fixtures are in bench/fixtures)"
+        type: string
+        default: ""
+      runs:
+        description: "Runs per task per arm"
+        type: string
+        default: "4"
+      revise_spec:
+        description: "revise package: npm spec, tarball URL(s) comma-separated, or `source`"
+        type: string
+        default: "revise@latest"
+      hermes_provider:
+        description: "Hermes provider"
+        type: choice
+        default: openai-codex
+        options: [openai-codex, xai-oauth, openai-api, xai, openrouter]
+      publish:
+        description: "Commit the aggregated results to bench/results/ on a branch and open a pull request"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+env:
+  # Agent CLI versions. Each run records the versions it actually used.
+  CLAUDE_CODE_VERSION: latest
+  CODEX_VERSION: latest
+  HERMES_COMMIT: 818c13be1dc4fd28987e1e881a9408224afd4535 # v0.21.6
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        name: Validate inputs and build the matrix
+        env:
+          AGENTS: ${{ inputs.agents }}
+          MODELS: ${{ inputs.models }}
+          RUNS: ${{ inputs.runs }}
+          TASKS: ${{ inputs.tasks }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, sys
+          agents = [a.strip() for a in os.environ["AGENTS"].split(",") if a.strip()]
+          bad = [a for a in agents if a not in ("claude", "codex", "hermes")]
+          if not agents or bad:
+              sys.exit(f"agents must be a comma-separated subset of claude,codex,hermes (got {bad or 'none'})")
+          models = {}
+          for pair in filter(None, (p.strip() for p in os.environ["MODELS"].split(","))):
+              agent, sep, model = pair.partition("=")
+              if not sep or agent.strip() not in ("claude", "codex", "hermes") or not re.fullmatch(r"[\w.:/@-]+", model.strip()):
+                  sys.exit(f"models: expected agent=model, got {pair!r}")
+              models[agent.strip()] = model.strip()
+          if not re.fullmatch(r"[1-9]\d?", os.environ["RUNS"].strip()):
+              sys.exit("runs must be a number from 1 to 99")
+          if not re.fullmatch(r"[\w,-]*", os.environ["TASKS"].replace(" ", "")):
+              sys.exit("tasks must be comma-separated task names")
+          matrix = [{"agent": a, "model": models.get(a, "")} for a in dict.fromkeys(agents)]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"matrix={json.dumps(matrix)}\n")
+          EOF
+
+  bench:
+    name: Bench (${{ matrix.agent }})
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: benchmark
+    # 10 tasks x 2 arms x 4 runs, arms in parallel, 15-minute cap per run; a
+    # typical run takes under a minute.
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: bench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The baseline arm's toolset: what a typical developer machine has for
+      # Word documents. Both arms get it; the revise arm adds only revise.
+      - name: Install document tools (LibreOffice headless, pandoc, python-docx)
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            libreoffice-writer-nogui pandoc \
+            fonts-liberation2 fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea
+          python -m pip install --quiet python-docx lxml
+          soffice --version
+          pandoc --version | head -1
+          python -c "import importlib.metadata as m; print('python-docx', m.version('python-docx'))"
+
+      - name: Install Claude Code
+        if: matrix.agent == 'claude'
+        timeout-minutes: 10
+        run: |
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          claude --version
+
+      - name: Install Codex
+        if: matrix.agent == 'codex'
+        timeout-minutes: 10
+        run: |
+          npm install -g "@openai/codex@${CODEX_VERSION}"
+          codex --version
+
+      - name: Install Hermes Agent
+        if: matrix.agent == 'hermes'
+        timeout-minutes: 20
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_COMMIT}/scripts/install.sh" \
+            -o "$RUNNER_TEMP/hermes-install.sh"
+          bash "$RUNNER_TEMP/hermes-install.sh" --non-interactive --skip-browser --skip-computer-use \
+            --commit "$HERMES_COMMIT" --dir "$HOME/hermes-agent" --hermes-home "$RUNNER_TEMP/hermes-install-home"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/hermes" --version
+
+      # Credentials that are files. Written owner-only, outside the results
+      # directory, and removed in the last step whatever happens.
+      - name: Write credential files
+        env:
+          AGENT: ${{ matrix.agent }}
+          CODEX_AUTH_JSON: ${{ matrix.agent == 'codex' && secrets.CODEX_AUTH_JSON || '' }}
+          HERMES_AUTH_JSON: ${{ matrix.agent == 'hermes' && secrets.HERMES_AUTH_JSON || '' }}
+        run: |
+          umask 077
+          # Codex reads only $CODEX_HOME, never a stray ~/.codex.
+          mkdir -p "$RUNNER_TEMP/codex-home"
+          echo "CODEX_HOME=$RUNNER_TEMP/codex-home" >> "$GITHUB_ENV"
+          if [ "$AGENT" = codex ] && [ -n "$CODEX_AUTH_JSON" ]; then
+            printf '%s' "$CODEX_AUTH_JSON" > "$RUNNER_TEMP/codex-home/auth.json"
+            echo "Codex: ChatGPT login (subscription)"
+          fi
+          if [ "$AGENT" = hermes ] && [ -n "$HERMES_AUTH_JSON" ]; then
+            printf '%s' "$HERMES_AUTH_JSON" > "$RUNNER_TEMP/hermes-auth.json"
+            echo "HERMES_AUTH_FILE=$RUNNER_TEMP/hermes-auth.json" >> "$GITHUB_ENV"
+            echo "Hermes: auth.json provided"
+          fi
+
+      - name: Run the benchmark
+        timeout-minutes: 330
+        env:
+          AGENT: ${{ matrix.agent }}
+          MODEL: ${{ matrix.model }}
+          TASKS: ${{ inputs.tasks }}
+          RUNS: ${{ inputs.runs }}
+          REVISE_SPEC: ${{ inputs.revise_spec }}
+          HERMES_PROVIDER: ${{ inputs.hermes_provider }}
+          # Each job sees only its own agent's credentials. run.py passes the
+          # agent one credential and, when a subscription credential is set,
+          # withholds every API key.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.agent == 'claude' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          ANTHROPIC_API_KEY: ${{ matrix.agent == 'claude' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ (matrix.agent == 'codex' || matrix.agent == 'hermes') && secrets.OPENAI_API_KEY || '' }}
+          XAI_API_KEY: ${{ matrix.agent == 'hermes' && secrets.XAI_API_KEY || '' }}
+          OPENROUTER_API_KEY: ${{ matrix.agent == 'hermes' && secrets.OPENROUTER_API_KEY || '' }}
+        run: |
+          args=(--agent "$AGENT" --runs "$RUNS" --revise-spec "$REVISE_SPEC" --out "out/$AGENT")
+          if [ -n "$MODEL" ]; then args+=(--model "$MODEL"); fi
+          if [ -n "$TASKS" ]; then args+=(--tasks "${TASKS// /}"); fi
+          if [ "$AGENT" = hermes ]; then args+=(--provider "$HERMES_PROVIDER"); fi
+          python3 -I run.py "${args[@]}"
+
+      - name: Summarize
+        if: always()
+        env:
+          AGENT: ${{ matrix.agent }}
+        run: |
+          if [ -d "out/$AGENT" ]; then
+            python3 -I summarize.py "out/$AGENT" --title "revise benchmark: $AGENT" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: results-${{ matrix.agent }}
+          path: bench/out/${{ matrix.agent }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Remove credentials
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/codex-home" "$RUNNER_TEMP/hermes-auth.json" "$RUNNER_TEMP/hermes-install-home" \
+            "$RUNNER_TEMP"/revise-bench-*
+
+  aggregate:
+    name: Aggregate
+    needs: [plan, bench]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: bench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: results-*
+          path: bench/out
+
+      - name: Summarize all agents
+        run: |
+          shopt -s nullglob
+          dirs=(out/results-*)
+          if [ ${#dirs[@]} -eq 0 ]; then echo "No results to aggregate."; exit 1; fi
+          mkdir -p aggregate
+          python3 -I summarize.py "${dirs[@]}" --export aggregate > aggregate/summary.md
+          cat aggregate/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmark-summary
+          path: bench/aggregate
+          retention-days: 90
+
+  publish:
+    name: Publish results
+    needs: aggregate
+    if: inputs.publish && needs.aggregate.result == 'success'
+    runs-on: ubuntu-latest
+    environment: benchmark
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: bench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Choose the results directory
+        id: dest
+        run: |
+          stamp="$(date -u +%Y-%m-%d)-${GITHUB_SHA::12}"
+          echo "dir=results/$stamp" >> "$GITHUB_OUTPUT"
+          echo "branch=bench-results/$stamp-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: benchmark-summary
+          path: bench/${{ steps.dest.outputs.dir }}
+
+      - name: Commit and open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIR: ${{ steps.dest.outputs.dir }}
+          BRANCH: ${{ steps.dest.outputs.branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add -- "$DIR"
+          git commit -m "bench: results from $RUN_URL"
+          git push origin "$BRANCH"
+          {
+            echo "Benchmark results from $RUN_URL, committed under \`bench/$DIR\`."
+            echo
+            cat "$DIR/summary.md"
+          } > "$RUNNER_TEMP/pr-body.md"
+          gh pr create --head "$BRANCH" --base "$GITHUB_REF_NAME" \
+            --title "bench: results $(basename "$DIR")" --body-file "$RUNNER_TEMP/pr-body.md"

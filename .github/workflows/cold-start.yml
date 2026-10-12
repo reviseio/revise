@@ -1,0 +1,197 @@
+# Cold start: does an agent that has never seen revise get from one pasted
+# line to a correct redline? Each agent starts on a fresh runner with nothing
+# but the bootstrap prompt and a task, installs the skill the page tells it
+# to, and edits a contract. Pass = the skill got installed and the contract
+# has the right tracked change. Transcripts are uploaded for reading.
+name: cold-start
+
+on:
+  workflow_dispatch:
+    inputs:
+      agents:
+        description: "Agents to run (JSON list): claude, codex, grok"
+        default: '["claude", "codex", "grok"]'
+      grok_model:
+        description: "omp model for the grok job"
+        default: "grok-4.5"
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PROMPT: >-
+    Read https://revise.io/skills/cli.md and follow it.
+    Then, in contract.docx in this folder, change the payment term in
+    section 2.2 from fifteen days to thirty days as a tracked change signed
+    "Cold start", and save the file.
+
+jobs:
+  cold-start:
+    runs-on: ubuntu-latest
+    environment: benchmark
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: ${{ fromJSON(inputs.agents) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The agent works in an empty folder with only the contract: no repo,
+      # no revise, no skills.
+      - name: Prepare a clean workspace
+        run: |
+          mkdir -p "$RUNNER_TEMP/work" "$RUNNER_TEMP/out"
+          cp bench/fixtures/contract.docx "$RUNNER_TEMP/work/"
+          echo "WORK=$RUNNER_TEMP/work" >> "$GITHUB_ENV"
+          echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+          ! command -v revise
+
+      - name: Install Claude Code
+        if: matrix.agent == 'claude'
+        run: npm install -g @anthropic-ai/claude-code && claude --version
+
+      - name: Install Codex
+        if: matrix.agent == 'codex'
+        run: npm install -g @openai/codex && codex --version
+
+      - name: Install omp
+        if: matrix.agent == 'grok'
+        run: |
+          cd "$RUNNER_TEMP"
+          base=https://github.com/can1357/oh-my-pi/releases/latest/download
+          curl -fsSLO "$base/omp-linux-x64"
+          curl -fsSLO "$base/SHA256SUMS.txt"
+          grep ' omp-linux-x64$' SHA256SUMS.txt | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 omp-linux-x64 "$HOME/.local/bin/omp"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/omp" --version
+
+      - name: Run the agent
+        timeout-minutes: 30
+        env:
+          AGENT: ${{ matrix.agent }}
+          GROK_MODEL: ${{ inputs.grok_model }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.agent == 'claude' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          ANTHROPIC_API_KEY: ${{ matrix.agent == 'claude' && secrets.ANTHROPIC_API_KEY || '' }}
+          CODEX_AUTH_JSON: ${{ matrix.agent == 'codex' && secrets.CODEX_AUTH_JSON || '' }}
+          OPENAI_API_KEY: ${{ matrix.agent == 'codex' && secrets.OPENAI_API_KEY || '' }}
+          XAI_API_KEY: ${{ matrix.agent == 'grok' && secrets.XAI_API_KEY || '' }}
+        run: |
+          cd "$WORK"
+          set +e
+          case "$AGENT" in
+            claude)
+              # A subscription token wins; then the API key is withheld.
+              if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then unset ANTHROPIC_API_KEY; fi
+              claude -p "$PROMPT" --dangerously-skip-permissions \
+                --output-format stream-json --verbose > "$OUT/transcript.jsonl" 2> "$OUT/stderr.log"
+              ;;
+            codex)
+              export CODEX_HOME="$RUNNER_TEMP/codex-home"
+              mkdir -p "$CODEX_HOME"
+              if [ -n "$CODEX_AUTH_JSON" ]; then
+                (umask 077; printf '%s' "$CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json")
+                unset OPENAI_API_KEY
+              else
+                printenv OPENAI_API_KEY | codex login --with-api-key > /dev/null
+              fi
+              codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
+                --json "$PROMPT" > "$OUT/transcript.jsonl" 2> "$OUT/stderr.log"
+              rm -f "$CODEX_HOME/auth.json"
+              ;;
+            grok)
+              omp --model "$GROK_MODEL" -p --auto-approve --no-session \
+                "$PROMPT" > "$OUT/transcript.txt" 2> "$OUT/stderr.log"
+              ;;
+          esac
+          echo "agent exit: $?" | tee "$OUT/exit.txt"
+          exit 0
+
+      - name: Check the result
+        id: check
+        run: |
+          cd "$WORK"
+          python3 - <<'EOF' | tee "$OUT/result.md"
+          import os, pathlib, re, zipfile
+          home = pathlib.Path.home()
+          work = pathlib.Path(os.environ["WORK"])
+          # Only where this agent loads skills from: a skill written where
+          # the agent never looks doesn't count. (The workflow's own checkout,
+          # which holds the skill's source, is never searched.)
+          places = {
+              "claude": [home / ".claude/plugins/cache", home / ".claude/skills", work / ".claude/skills"],
+              "codex": [pathlib.Path(os.environ["RUNNER_TEMP"]) / "codex-home", home / ".codex",
+                        home / ".agents/skills", work / ".agents/skills"],
+              "grok": [home / ".omp", home / ".agents/skills", work / ".agents/skills",
+                       home / ".claude/skills", work / ".claude/skills"],
+          }[os.environ["AGENT"]]
+          skills = sorted({str(p) for r in places if r.exists()
+                           for p in r.rglob("revise-cli/SKILL.md")})
+          strays = sorted({str(p) for r in (home, work) if r.exists()
+                           for p in r.rglob("revise-cli/SKILL.md")} - set(skills))
+          xml = zipfile.ZipFile("contract.docx").read("word/document.xml").decode()
+          deleted = re.findall(r"<w:del\b[^>]*w:author=\"([^\"]*)\"[^>]*>(.*?)</w:del>", xml, re.S)
+          inserted = re.findall(r"<w:ins\b[^>]*w:author=\"([^\"]*)\"[^>]*>(.*?)</w:ins>", xml, re.S)
+          text = lambda parts: [(a, re.sub(r"<[^>]+>", "", t)) for a, t in parts]
+          d, i = text(deleted), text(inserted)
+          redline = any("fifteen" in t for _, t in d) and any("thirty" in t for _, t in i)
+          signed = any(a == "Cold start" for a, _ in d + i)
+          checks = {
+              "skill installed where the agent reads skills": bool(skills),
+              "fifteen → thirty as a tracked change": redline,
+              'signed "Cold start"': signed,
+          }
+          print(f"## {os.environ['AGENT']}\n")
+          for name, ok in checks.items():
+              print(f"- {'✅' if ok else '❌'} {name}")
+          print(f"\nSkill found at: {', '.join(skills) or 'nowhere'}")
+          if strays:
+              print(f"Also written where this agent doesn't read: {', '.join(strays)}")
+          print(f"Tracked changes: {len(d)} deletions, {len(i)} insertions")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"passed={'true' if all(checks.values()) else 'false'}\n")
+          EOF
+          cat "$OUT/result.md" >> "$GITHUB_STEP_SUMMARY"
+          cp contract.docx "$OUT/"
+        env:
+          AGENT: ${{ matrix.agent }}
+
+      # Secrets never reach the artifact, even if an agent printed one.
+      - name: Scrub secrets from the transcript
+        if: always()
+        env:
+          S1: ${{ secrets.ANTHROPIC_API_KEY }}
+          S2: ${{ secrets.OPENAI_API_KEY }}
+          S3: ${{ secrets.XAI_API_KEY }}
+          S4: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          for f in "$OUT"/*.jsonl "$OUT"/*.txt "$OUT"/*.log; do
+            [ -f "$f" ] || continue
+            python3 - "$f" <<'EOF'
+          import os, sys
+          path = sys.argv[1]
+          text = open(path, encoding="utf-8", errors="replace").read()
+          for key in ("S1", "S2", "S3", "S4"):
+              value = os.environ.get(key, "")
+              if len(value) > 8:
+                  text = text.replace(value, "[redacted]")
+          open(path, "w", encoding="utf-8").write(text)
+          EOF
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cold-start-${{ matrix.agent }}
+          path: ${{ env.OUT }}
+
+      - name: Fail when a check failed
+        if: steps.check.outputs.passed != 'true'
+        run: exit 1

@@ -1,0 +1,2092 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:revise:cli-output:1",
+  "title": "revise --json output, schema 1",
+  "description": "One envelope per invocation. Fields may be added within schema 1; consumers ignore unknown fields.",
+  "type": "object",
+  "required": ["schema", "ok", "command", "meta", "data", "warnings", "error"],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "command": {
+      "type": ["string", "null"],
+      "enum": [
+        "status",
+        "outline",
+        "read",
+        "grep",
+        "search",
+        "replace-all",
+        "replace-text",
+        "call",
+        "tools",
+        "mode",
+        "changes",
+        "diff",
+        "accept",
+        "reject",
+        "history",
+        "undo",
+        "restore",
+        "render",
+        "export",
+        "new",
+        "compare",
+        "convert",
+        "xml ls",
+        "xml cat",
+        "xml patch",
+        "examples",
+        "skill",
+        "skill install",
+        "help",
+        "version",
+        null
+      ]
+    },
+    "meta": {
+      "type": "object",
+      "required": ["version", "build"],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "build": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "data": {
+      "type": ["object", "null"]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/problem"
+      }
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/error"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "null"
+          },
+          "data": {
+            "type": "object"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "error": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-status"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-status"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-outline"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-outline"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-grep"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-grep"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-tool"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-tool"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-call"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-call"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-replace-all"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-replace-all"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-tools"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-tools"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-mode"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-mode"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-changes"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-changes"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-settle"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-settle"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-diff"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-diff"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-history"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-history"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-undo"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-undo"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-render"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-render"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-export"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-export"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-new"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-new"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-compare"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-compare"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-convert"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-convert"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-xml-ls"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-xml-ls"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-xml-cat"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-xml-cat"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-xml-patch"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-xml-patch"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-examples"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-examples"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-skill"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-skill"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-skill-install"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-skill-install"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-help"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-help"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-version"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-version"
+      }
+    }
+  ],
+  "$defs": {
+    "path": {
+      "type": "string",
+      "description": "An absolute filesystem path."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "strings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "details": {
+      "type": ["object", "null"]
+    },
+    "problem": {
+      "type": "object",
+      "required": ["code", "message", "details"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "$ref": "#/$defs/details"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "hint", "details"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "hint": {
+          "type": ["string", "null"]
+        },
+        "details": {
+          "$ref": "#/$defs/details"
+        }
+      }
+    },
+    "mode": {
+      "enum": ["suggest", "edit"]
+    },
+    "format": {
+      "enum": ["docx", "pdf", "md", "html", "txt"]
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "pageCount",
+        "wordCount",
+        "pageSize",
+        "orientation",
+        "pageInches",
+        "marginsInches",
+        "title",
+        "headingCounts",
+        "lists",
+        "tables",
+        "imageCount",
+        "headersFooters",
+        "trackedChangeCount"
+      ],
+      "properties": {
+        "pageCount": {
+          "type": ["integer", "null"]
+        },
+        "wordCount": {
+          "$ref": "#/$defs/count"
+        },
+        "pageSize": {
+          "type": "string"
+        },
+        "orientation": {
+          "enum": ["portrait", "landscape"]
+        },
+        "pageInches": {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": {
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          }
+        },
+        "marginsInches": {
+          "type": "object",
+          "required": ["top", "right", "bottom", "left"],
+          "properties": {
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            },
+            "left": {
+              "type": "number"
+            }
+          }
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
+        "headingCounts": {
+          "type": "object",
+          "description": "Headings per level: {\"H1\": 2, \"H2\": 5}.",
+          "additionalProperties": {
+            "$ref": "#/$defs/count"
+          }
+        },
+        "lists": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["itemCount"],
+            "properties": {
+              "itemCount": {
+                "$ref": "#/$defs/count"
+              }
+            }
+          }
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["rowCount", "columnCount"],
+            "properties": {
+              "rowCount": {
+                "$ref": "#/$defs/count"
+              },
+              "columnCount": {
+                "$ref": "#/$defs/count"
+              }
+            }
+          }
+        },
+        "imageCount": {
+          "$ref": "#/$defs/count"
+        },
+        "headersFooters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["side", "slot", "text"],
+            "properties": {
+              "side": {
+                "enum": ["header", "footer"]
+              },
+              "slot": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "trackedChangeCount": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "option": {
+      "type": "object",
+      "required": ["flag", "description"],
+      "properties": {
+        "flag": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "commandHelp": {
+      "type": "object",
+      "required": ["name", "usage", "summary", "options"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        }
+      }
+    },
+    "is-status": {
+      "properties": {
+        "command": {
+          "const": "status"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-outline": {
+      "properties": {
+        "command": {
+          "const": "outline"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-grep": {
+      "properties": {
+        "command": {
+          "const": "grep"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-tool": {
+      "properties": {
+        "command": {
+          "enum": ["read", "search"]
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-replace-all": {
+      "properties": {
+        "command": {
+          "enum": ["replace-all", "replace-text"],
+          "description": "replace-text is the 3.0 name, reported when a command is run under it."
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-tools": {
+      "properties": {
+        "command": {
+          "const": "tools"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-mode": {
+      "properties": {
+        "command": {
+          "const": "mode"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-changes": {
+      "properties": {
+        "command": {
+          "const": "changes"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-settle": {
+      "properties": {
+        "command": {
+          "enum": ["accept", "reject"]
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-diff": {
+      "properties": {
+        "command": {
+          "const": "diff"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-history": {
+      "properties": {
+        "command": {
+          "const": "history"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-undo": {
+      "properties": {
+        "command": {
+          "enum": ["undo", "restore"]
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-render": {
+      "properties": {
+        "command": {
+          "const": "render"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-export": {
+      "properties": {
+        "command": {
+          "const": "export"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-new": {
+      "properties": {
+        "command": {
+          "const": "new"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-compare": {
+      "properties": {
+        "command": {
+          "const": "compare"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-convert": {
+      "properties": {
+        "command": {
+          "const": "convert"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-xml-ls": {
+      "properties": {
+        "command": {
+          "const": "xml ls"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-xml-cat": {
+      "properties": {
+        "command": {
+          "const": "xml cat"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-xml-patch": {
+      "properties": {
+        "command": {
+          "const": "xml patch"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-skill": {
+      "properties": {
+        "command": {
+          "const": "skill"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-help": {
+      "properties": {
+        "command": {
+          "const": "help"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-version": {
+      "properties": {
+        "command": {
+          "const": "version"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-skill-install": {
+      "properties": {
+        "command": {
+          "const": "skill install"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-examples": {
+      "properties": {
+        "command": {
+          "const": "examples"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "is-call": {
+      "properties": {
+        "command": {
+          "const": "call"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "dataOf-status": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "format",
+            "mode",
+            "blockCount",
+            "wordCount",
+            "trackedChangeCount",
+            "checkpoint",
+            "sourceFidelity"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "format": {
+              "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/mode"
+            },
+            "blockCount": {
+              "$ref": "#/$defs/count"
+            },
+            "wordCount": {
+              "$ref": "#/$defs/count"
+            },
+            "trackedChangeCount": {
+              "$ref": "#/$defs/count"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "sourceFidelity": {
+              "description": "How an export would relate to the .docx the document came from; null for other formats.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "fidelity",
+                    "regeneratedBlockIds",
+                    "changedDomains",
+                    "convertedReason"
+                  ],
+                  "properties": {
+                    "fidelity": {
+                      "enum": ["exact", "grafted", "converted"]
+                    },
+                    "regeneratedBlockIds": {
+                      "$ref": "#/$defs/strings"
+                    },
+                    "changedDomains": {
+                      "$ref": "#/$defs/strings"
+                    },
+                    "convertedReason": {
+                      "enum": [
+                        "no-capture",
+                        "no-carrier",
+                        "carrier-hash-mismatch",
+                        "unpaired-capture",
+                        null
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "dataOf-outline": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "blockCount",
+            "wordCount",
+            "sectionCount",
+            "sections",
+            "nextOffset"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "blockCount": {
+              "$ref": "#/$defs/count"
+            },
+            "wordCount": {
+              "$ref": "#/$defs/count"
+            },
+            "sectionCount": {
+              "$ref": "#/$defs/count"
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "level",
+                  "startIndex",
+                  "endIndex",
+                  "startBlockId",
+                  "endBlockId",
+                  "blockCount",
+                  "wordCount"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "level": {
+                    "enum": [1, 2, 3]
+                  },
+                  "startIndex": {
+                    "$ref": "#/$defs/count"
+                  },
+                  "endIndex": {
+                    "$ref": "#/$defs/count",
+                    "description": "Inclusive."
+                  },
+                  "startBlockId": {
+                    "type": "string"
+                  },
+                  "endBlockId": {
+                    "type": "string"
+                  },
+                  "blockCount": {
+                    "$ref": "#/$defs/count"
+                  },
+                  "wordCount": {
+                    "$ref": "#/$defs/count"
+                  }
+                }
+              }
+            },
+            "nextOffset": {
+              "type": ["integer", "null"]
+            }
+          }
+        }
+      }
+    },
+    "view": {
+      "enum": ["tracked", "accepted", "original"],
+      "description": "How pending tracked changes read: tracked shows them, accepted and original as if every one were accepted or rejected."
+    },
+    "grepMatch": {
+      "type": "object",
+      "required": ["text", "change", "changeId"],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "change": {
+          "enum": ["inserted", "deleted", null]
+        },
+        "changeId": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "dataOf-grep": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "pattern",
+            "regex",
+            "ignoreCase",
+            "view",
+            "matchCount",
+            "blocks"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "boolean"
+            },
+            "ignoreCase": {
+              "type": "boolean"
+            },
+            "view": {
+              "$ref": "#/$defs/view"
+            },
+            "matchCount": {
+              "$ref": "#/$defs/count"
+            },
+            "blocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "blockId",
+                  "blockIndex",
+                  "matchCount",
+                  "text",
+                  "matches"
+                ],
+                "properties": {
+                  "blockId": {
+                    "type": "string"
+                  },
+                  "blockIndex": {
+                    "$ref": "#/$defs/count"
+                  },
+                  "matchCount": {
+                    "$ref": "#/$defs/count"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "matches": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/grepMatch"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataOf-tool": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "tool",
+            "saved",
+            "checkpoint",
+            "message",
+            "changeIds",
+            "html",
+            "result"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "saved": {
+              "type": "boolean"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "message": {
+              "type": ["string", "null"]
+            },
+            "changeIds": {
+              "$ref": "#/$defs/strings"
+            },
+            "html": {
+              "type": ["string", "null"]
+            },
+            "result": {
+              "description": "The tool's own result; see revise tools <name>."
+            },
+            "view": {
+              "$ref": "#/$defs/view",
+              "description": "read and search: the view html and matches show. Absent for other tools."
+            },
+            "viewMatches": {
+              "description": "search: blocks the search tool can't see in this view. Tracked: matches inside deleted text. Original: every match in the original text (no search_result_id).",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "query",
+                  "blockId",
+                  "blockIndex",
+                  "text",
+                  "changeIds"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "blockId": {
+                    "type": "string"
+                  },
+                  "blockIndex": {
+                    "$ref": "#/$defs/count"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "changeIds": {
+                    "$ref": "#/$defs/strings"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataOf-replace-all": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "find",
+            "replace",
+            "matchedBlockIds",
+            "replacedOccurrences",
+            "regions",
+            "nearMisses",
+            "changeIds",
+            "failures",
+            "saved",
+            "checkpoint",
+            "copiedFrom"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "find": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "string"
+            },
+            "matchedBlockIds": {
+              "$ref": "#/$defs/strings"
+            },
+            "replacedOccurrences": {
+              "$ref": "#/$defs/count"
+            },
+            "regions": {
+              "type": "object",
+              "description": "Occurrences replaced per part of the document; parts with none are left out.",
+              "properties": {
+                "body": { "$ref": "#/$defs/count" },
+                "header": { "$ref": "#/$defs/count" },
+                "footer": { "$ref": "#/$defs/count" },
+                "footnote": { "$ref": "#/$defs/count" },
+                "endnote": { "$ref": "#/$defs/count" }
+              },
+              "additionalProperties": false
+            },
+            "nearMisses": {
+              "type": "array",
+              "description": "Text that looser matching would have replaced: other capitalization (--ignore-case) or other quotes and spaces (without --exact).",
+              "items": {
+                "type": "object",
+                "required": ["text", "count", "reason"],
+                "properties": {
+                  "text": { "type": "string" },
+                  "count": { "$ref": "#/$defs/count" },
+                  "reason": { "enum": ["case", "characters"] }
+                }
+              }
+            },
+            "changeIds": {
+              "$ref": "#/$defs/strings"
+            },
+            "failures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["blockId", "code", "message"],
+                "properties": {
+                  "blockId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "saved": {
+              "type": "boolean"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "copiedFrom": {
+              "type": ["string", "null"],
+              "description": "With --out: the original file the copy was made from (absolute path); the edit went to `file`. Otherwise null."
+            }
+          }
+        }
+      }
+    },
+    "dataOf-tools": {
+      "properties": {
+        "data": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["tools"],
+              "properties": {
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "summary"],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "summary": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["name", "description", "inputSchema"],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "inputSchema": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "dataOf-mode": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["file", "mode", "changed"],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "mode": {
+              "$ref": "#/$defs/mode"
+            },
+            "changed": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "dataOf-changes": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["file", "section", "trackedChangeCount", "changes"],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "section": {
+              "type": ["string", "null"]
+            },
+            "blocks": {
+              "type": ["string", "null"]
+            },
+            "trackedChangeCount": {
+              "$ref": "#/$defs/count"
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "changeId",
+                  "type",
+                  "author",
+                  "blockId",
+                  "blockIndex",
+                  "section",
+                  "deleted",
+                  "inserted"
+                ],
+                "properties": {
+                  "changeId": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "author": {
+                    "type": "string"
+                  },
+                  "blockId": {
+                    "type": ["string", "null"]
+                  },
+                  "blockIndex": {
+                    "type": ["integer", "null"]
+                  },
+                  "section": {
+                    "type": ["string", "null"]
+                  },
+                  "deleted": {
+                    "type": "string"
+                  },
+                  "inserted": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataOf-settle": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "action",
+            "dryRun",
+            "resolved",
+            "wouldResolve",
+            "notFound",
+            "failed",
+            "saved",
+            "checkpoint",
+            "copiedFrom"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "action": {
+              "enum": ["accept", "reject"]
+            },
+            "dryRun": {
+              "type": "boolean"
+            },
+            "resolved": {
+              "$ref": "#/$defs/strings"
+            },
+            "wouldResolve": {
+              "$ref": "#/$defs/strings"
+            },
+            "notFound": {
+              "$ref": "#/$defs/strings"
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["changeId", "code", "message"],
+                "properties": {
+                  "changeId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "saved": {
+              "type": "boolean"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "copiedFrom": {
+              "type": ["string", "null"],
+              "description": "With --out: the original file the copy was made from (absolute path); the edit went to `file`. Otherwise null."
+            }
+          }
+        }
+      }
+    },
+    "dataOf-diff": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["file", "since", "changedParagraphCount", "text"],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "since": {
+              "type": ["integer", "null"]
+            },
+            "changedParagraphCount": {
+              "$ref": "#/$defs/count"
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "dataOf-history": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["file", "checkpoint", "checkpoints"],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "checkpoints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["checkpoint", "at", "command", "summary"],
+                "properties": {
+                  "checkpoint": {
+                    "$ref": "#/$defs/count"
+                  },
+                  "at": {
+                    "type": "string",
+                    "description": "ISO 8601, UTC."
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataOf-undo": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["file", "checkpoint", "from", "discarded", "saved"],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "from": {
+              "$ref": "#/$defs/count"
+            },
+            "discarded": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/count"
+              }
+            },
+            "saved": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "dataOf-render": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "output",
+            "outputWritten",
+            "mimeType",
+            "width",
+            "height",
+            "pages",
+            "totalPages",
+            "view",
+            "description",
+            "placeholderImageCount",
+            "failedImageCount"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "output": {
+              "$ref": "#/$defs/path"
+            },
+            "outputWritten": {
+              "type": "boolean"
+            },
+            "mimeType": {
+              "enum": ["image/png", "image/jpeg"]
+            },
+            "width": {
+              "$ref": "#/$defs/count"
+            },
+            "height": {
+              "$ref": "#/$defs/count"
+            },
+            "pages": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "totalPages": {
+              "$ref": "#/$defs/count"
+            },
+            "view": {
+              "enum": ["tracked", "accepted", "original"]
+            },
+            "description": {
+              "type": "string"
+            },
+            "placeholderImageCount": {
+              "$ref": "#/$defs/count"
+            },
+            "failedImageCount": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        }
+      }
+    },
+    "dataOf-export": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "output",
+            "outputWritten",
+            "format",
+            "byteCount",
+            "final",
+            "trackedChangeCount",
+            "docxExport",
+            "summary"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "output": {
+              "$ref": "#/$defs/path"
+            },
+            "outputWritten": {
+              "type": "boolean"
+            },
+            "format": {
+              "$ref": "#/$defs/format"
+            },
+            "byteCount": {
+              "$ref": "#/$defs/count"
+            },
+            "final": {
+              "type": "boolean"
+            },
+            "view": {
+              "$ref": "#/$defs/view"
+            },
+            "trackedChangeCount": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "description": "Tracked changes in the written file, as revise reads it back; 0 for formats that can't hold them; null if a .docx could not be read back."
+            },
+            "docxExport": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "method",
+                    "exact",
+                    "regeneratedBlockCount",
+                    "fallbackCode"
+                  ],
+                  "properties": {
+                    "method": {
+                      "enum": ["graft", "regenerated"]
+                    },
+                    "exact": {
+                      "type": "boolean"
+                    },
+                    "regeneratedBlockCount": {
+                      "$ref": "#/$defs/count"
+                    },
+                    "fallbackCode": {
+                      "type": ["string", "null"]
+                    }
+                  }
+                }
+              ]
+            },
+            "summary": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/summary"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "dataOf-new": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "output",
+            "outputWritten",
+            "format",
+            "mode",
+            "checkpoint",
+            "summary"
+          ],
+          "properties": {
+            "output": {
+              "$ref": "#/$defs/path"
+            },
+            "outputWritten": {
+              "type": "boolean"
+            },
+            "format": {
+              "$ref": "#/$defs/format"
+            },
+            "mode": {
+              "$ref": "#/$defs/mode"
+            },
+            "checkpoint": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "description": "null when setting up the new file failed after it was written (exit 2)."
+            },
+            "summary": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/summary"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "dataOf-compare": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "original",
+            "revised",
+            "output",
+            "outputWritten",
+            "author",
+            "inlineChangeCount",
+            "insertedBlockCount",
+            "deletedBlockCount",
+            "unmarkedBlockCount",
+            "untrackedRegions",
+            "verification"
+          ],
+          "properties": {
+            "original": {
+              "$ref": "#/$defs/path"
+            },
+            "revised": {
+              "$ref": "#/$defs/path"
+            },
+            "output": {
+              "$ref": "#/$defs/path"
+            },
+            "outputWritten": {
+              "type": "boolean"
+            },
+            "author": {
+              "type": "string"
+            },
+            "inlineChangeCount": {
+              "$ref": "#/$defs/count"
+            },
+            "insertedBlockCount": {
+              "$ref": "#/$defs/count"
+            },
+            "deletedBlockCount": {
+              "$ref": "#/$defs/count"
+            },
+            "unmarkedBlockCount": {
+              "$ref": "#/$defs/count"
+            },
+            "untrackedRegions": {
+              "$ref": "#/$defs/strings"
+            },
+            "verification": {
+              "type": "object",
+              "required": [
+                "scope",
+                "acceptAllMatchesRevised",
+                "rejectAllMatchesOriginal"
+              ],
+              "properties": {
+                "scope": {
+                  "const": "normalized_text"
+                },
+                "acceptAllMatchesRevised": {
+                  "type": "boolean"
+                },
+                "rejectAllMatchesOriginal": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataOf-convert": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "input",
+            "inputFormat",
+            "output",
+            "outputWritten",
+            "format",
+            "byteCount",
+            "final"
+          ],
+          "properties": {
+            "input": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/path"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "null when the document came from stdin (-)."
+            },
+            "inputFormat": {
+              "oneOf": [
+                {
+                  "enum": ["docx", "odt", "rtf", "html", "md", "txt"]
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The format read: from --from, recognized from stdin's bytes, or from the input's extension."
+            },
+            "output": {
+              "$ref": "#/$defs/path"
+            },
+            "outputWritten": {
+              "type": "boolean"
+            },
+            "format": {
+              "$ref": "#/$defs/format"
+            },
+            "byteCount": {
+              "$ref": "#/$defs/count"
+            },
+            "final": {
+              "type": "boolean"
+            },
+            "view": {
+              "$ref": "#/$defs/view"
+            }
+          }
+        }
+      }
+    },
+    "dataOf-xml-ls": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["file", "parts"],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["path", "byteCount"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Inside the package, e.g. word/document.xml."
+                  },
+                  "byteCount": {
+                    "$ref": "#/$defs/count"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataOf-xml-cat": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["file", "part", "match", "fragments", "truncated"],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "part": {
+              "type": "string"
+            },
+            "match": {
+              "type": ["string", "null"]
+            },
+            "fragments": {
+              "$ref": "#/$defs/strings"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "dataOf-xml-patch": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "part",
+            "replacementCount",
+            "saved",
+            "checkpoint",
+            "copiedFrom"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "part": {
+              "type": "string"
+            },
+            "replacementCount": {
+              "$ref": "#/$defs/count"
+            },
+            "saved": {
+              "type": "boolean"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "copiedFrom": {
+              "type": ["string", "null"],
+              "description": "With --out: the original file the copy was made from (absolute path); the edit went to `file`. Otherwise null."
+            }
+          }
+        }
+      }
+    },
+    "dataOf-skill": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["reference", "markdown"],
+          "properties": {
+            "markdown": {
+              "type": "string"
+            },
+            "reference": {
+              "type": ["string", "null"],
+              "description": "The reference file printed (--reference), or null for SKILL.md itself."
+            }
+          }
+        }
+      }
+    },
+    "dataOf-help": {
+      "properties": {
+        "data": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["commands", "globalOptions"],
+              "properties": {
+                "commands": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/commandHelp"
+                  }
+                },
+                "globalOptions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/option"
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["command"],
+              "properties": {
+                "command": {
+                  "$ref": "#/$defs/commandHelp"
+                },
+                "inputSchema": {
+                  "type": "object",
+                  "description": "For an editing tool's help (revise <tool> --help): its input's JSON Schema, as revise tools <tool> prints it."
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "dataOf-version": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["version", "build"],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "build": {
+              "type": ["string", "null"]
+            }
+          }
+        }
+      }
+    },
+    "dataOf-skill-install": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["output", "outputWritten"],
+          "properties": {
+            "output": {
+              "$ref": "#/$defs/path"
+            },
+            "outputWritten": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "dataOf-examples": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["examples"],
+          "properties": {
+            "examples": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["description", "command"],
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string",
+                    "description": "A shell command line, runnable as written given the files it names."
+                  },
+                  "docs": {
+                    "type": "string",
+                    "description": "Where to read more, when there is a page for it."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataOf-call": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "tool",
+            "saved",
+            "checkpoint",
+            "message",
+            "changeIds",
+            "html",
+            "result",
+            "copiedFrom"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "saved": {
+              "type": "boolean"
+            },
+            "checkpoint": {
+              "$ref": "#/$defs/count"
+            },
+            "message": {
+              "type": ["string", "null"]
+            },
+            "changeIds": {
+              "$ref": "#/$defs/strings"
+            },
+            "html": {
+              "type": ["string", "null"]
+            },
+            "result": {
+              "description": "The tool's own result; see revise tools <name>."
+            },
+            "copiedFrom": {
+              "type": ["string", "null"],
+              "description": "With --out: the original file the copy was made from (absolute path); the edit went to `file`. Otherwise null."
+            }
+          }
+        }
+      }
+    }
+  }
+}

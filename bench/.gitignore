@@ -1,0 +1,6 @@
+results*/
+*.log
+__pycache__/
+*.pyc
+hermes-skills/
+out/

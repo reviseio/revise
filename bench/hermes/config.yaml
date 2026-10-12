@@ -1,0 +1,80 @@
+# Hermes Agent profile template for the benchmark. run.py renders one copy per
+# arm into a temporary HERMES_HOME (never ~/.hermes):
+#
+#   revisebench  (revise arm)    the bundled `docx` skill disabled, the revise
+#                                skill loaded from skills.external_dirs
+#   revisebase   (baseline arm)  Hermes's bundled skills, `docx` included
+#
+# The two profiles differ only in the skills block. Memory, user profiles,
+# skill creation, MCP servers, telemetry, and update checks are off, so runs
+# can't learn from each other or reach anything outside the work directory.
+# run.py fills in the model and skills placeholders below.
+model:
+${model_block}
+agent:
+  max_turns: 150
+  verbose: false
+  reasoning_effort: medium
+terminal:
+  backend: local
+  cwd: .
+  timeout: 180
+  home_mode: auto
+  lifetime_seconds: 300
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
+compression:
+  enabled: true
+  progress_notices: false
+  threshold: 0.5
+  target_ratio: 0.2
+  protect_last_n: 20
+  min_tail_user_messages: 1
+  max_attempts: 3
+  proactive_prune_tokens: 0
+  proactive_prune_min_result_chars: 8000
+  proactive_prune_min_reclaim_tokens: 4096
+  protect_first_n: 3
+  idle_compact_after_seconds: 0
+prompt_caching:
+  cache_ttl: 5m
+display:
+  bell_on_complete: false
+  show_reasoning: false
+  streaming: false
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+skills:
+  creation_nudge_interval: 0
+${skills_block}
+code_execution:
+  timeout: 300
+  max_tool_calls: 50
+streaming:
+  enabled: false
+onboarding:
+  profile_build: "off"
+  seen:
+    busy_input_prompt: true
+    tool_progress_prompt: true
+telemetry:
+  shared_metrics:
+    enabled: false
+updates:
+  check: false
+  pre_update_backup: false
+session_reset:
+  mode: none
+command_allowlist:
+  - script execution via -e/-c flag
+_config_version: 50

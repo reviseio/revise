@@ -1,0 +1,22 @@
+#!/bin/sh
+# HOOK: build revise from this repository's own source checkout.
+#
+# Used when the revise package spec is `source` (run.py --revise-spec source,
+# or the workflow's revise_spec input): builds and packs the package exactly
+# as it is published (npm run build, then npm pack ./dist).
+#
+#   usage:  build-revise-from-source <repo root> <output dir>
+#   stdout: one npm tarball path per line; run.py installs them together
+#   exit:   non-zero on failure; stderr is shown to the user
+#
+# @reviseio/engine is a closed package and comes from npm, at the version
+# package.json pins.
+set -eu
+root=$1
+mkdir -p "$2"
+out=$(cd "$2" && pwd)
+cd "$root"
+npm install --no-audit --no-fund >&2
+npm run build >&2
+name=$(npm pack ./dist --pack-destination "$out" | tail -n 1)
+echo "$out/$name"
