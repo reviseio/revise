@@ -142,20 +142,3 @@ const { bytes } = await doc.export({ format: "docx" });
 `revise` is available under the MIT License.
 
 [`@reviseio/engine`](https://www.npmjs.com/package/@reviseio/engine) is free for any use under its own license.
-
-## This repo
-
-The source of the `revise` npm package: the CLI (`src/cli/`) and library
-(`src/lib/`), synced from Revise's main repository on each release.
-
-```bash
-npm install
-npm run build   # dist/, as published
-npm test
-npm run pack    # revise-<version>.tgz
-```
-
-The engine ([`@reviseio/engine`](https://www.npmjs.com/package/@reviseio/engine))
-is a separate, closed package; no engine code is in this repo. Issues and pull
-requests are welcome: accepted changes land here with the next sync, credited
-to you.
