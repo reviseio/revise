@@ -149,6 +149,7 @@ Other options: `--arms`, `--tasks`, `--runs` (default 4), `--timeout` (seconds p
   - host platform, Python, Node, LibreOffice, pandoc and python-docx versions
   - the GitHub Actions run URL
 - **`DIR/<arm>/<task>/<n>/record.json`**: one per run, with checks, `info` (changed parts and paragraph counts), turns, wall time, cost, tokens, and the agent's final message (truncated to 1,500 characters).
+- **`DIR/<arm>/<task>/<n>/transcript.jsonl`**: the agent's event stream (Claude Code and Codex), with credentials redacted. The record's `skill_read` says whether a revise-arm agent loaded the skill (Claude's Skill tool, a read of its `SKILL.md`, or `revise skill`), and `revise_calls` counts its `revise` commands. The summary reports how many revise-arm runs read the skill.
 - **`DIR/<arm>/<task>/<n>/work/`**: the agent's output files.
 - **`DIR/summary.json`**: all records.
 

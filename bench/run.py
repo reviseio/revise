@@ -287,7 +287,7 @@ CODEX_TOOL_ITEMS = {"command_execution", "file_change", "mcp_tool_call", "web_se
 
 
 def claude_command(prompt, args, run_dir):
-    return ["claude", "-p", prompt, "--model", args.model, "--output-format", "json",
+    return ["claude", "-p", prompt, "--model", args.model, "--output-format", "stream-json", "--verbose",
             "--settings", '{"disableAllHooks": true}',  # no user hooks (sounds)
             "--max-turns", "80", "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep,Skill"]
 
@@ -314,16 +314,32 @@ def hermes_command(prompt, args, run_dir):
 
 
 def run_claude(command, work, env, args):
+    """Headless Claude Code, streamed: the last event is the same result object
+    `--output-format json` prints; the events before it are the transcript."""
     try:
         proc = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True,
                               timeout=args.timeout, stdin=subprocess.DEVNULL)
-        raw = proc.stdout
-    except subprocess.TimeoutExpired:
-        raw = ""
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {"is_error": True, "result": raw[-2000:]}
+        lines = proc.stdout.splitlines()
+    except subprocess.TimeoutExpired as error:
+        out = error.stdout or ""
+        lines = (out.decode(errors="replace") if isinstance(out, bytes) else out).splitlines()
+    events = []
+    for line in lines:
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    calls = []  # (tool, input) for every tool call
+    for event in events:
+        if event.get("type") != "assistant":
+            continue
+        for part in (event.get("message") or {}).get("content") or []:
+            if isinstance(part, dict) and part.get("type") == "tool_use":
+                calls.append((part.get("name"), json.dumps(part.get("input") or {})))
+    result = next((e for e in reversed(events) if e.get("type") == "result"), None)
+    if result is None:
+        result = {"is_error": True, "result": "\n".join(lines)[-2000:]}
+    return {**result, "transcript": lines, "calls": calls}
 
 
 def run_codex(command, work, env, args):
@@ -336,7 +352,7 @@ def run_codex(command, work, env, args):
     except subprocess.TimeoutExpired as error:
         out = error.stdout or ""
         lines = (out.decode(errors="replace") if isinstance(out, bytes) else out).splitlines()
-    steps, final, usage = 0, "", {"input": 0, "cached": 0, "output": 0}
+    steps, final, usage, calls = 0, "", {"input": 0, "cached": 0, "output": 0}, []
     for line in lines:
         try:
             event = json.loads(line)
@@ -345,6 +361,7 @@ def run_codex(command, work, env, args):
         item = event.get("item") or {}
         if event.get("type") == "item.completed" and item.get("type") in CODEX_TOOL_ITEMS:
             steps += 1
+            calls.append((item.get("type"), item.get("command") or json.dumps(item)))
         if event.get("type") == "item.completed" and item.get("type") == "agent_message":
             final = item.get("text", "")
         if event.get("type") == "turn.completed":
@@ -357,7 +374,8 @@ def run_codex(command, work, env, args):
     cost = ((usage["input"] - usage["cached"]) * price_in + usage["cached"] * price_cached
             + usage["output"] * price_out) / 1_000_000
     return {"num_turns": steps + 1, "total_cost_usd": cost if args.model in CODEX_PRICES else None,
-            "is_error": not final, "session_id": None, "result": final, "usage": usage}
+            "is_error": not final, "session_id": None, "result": final, "usage": usage,
+            "transcript": lines, "calls": calls}
 
 
 def run_hermes(command, work, env, args, run_dir):
@@ -435,6 +453,17 @@ def prepare_run(arm, task, n, ctx):
     return run_dir, work, env, command
 
 
+def skill_read(calls):
+    """Whether the agent loaded the revise skill: Claude's Skill tool, a read of
+    its SKILL.md, or `revise skill` (which prints it)."""
+    for tool, text in calls:
+        if tool == "Skill" and "revise" in text:
+            return True
+        if "revise-cli/SKILL.md" in text or re.search(r"revise\s+skill(?![\w-])(?!\s+install)", text):
+            return True
+    return False
+
+
 def run_one(arm, task, n, ctx):
     args, secrets = ctx["args"], ctx["secrets"]
     run_dir, work, env, command = prepare_run(arm, task, n, ctx)
@@ -448,6 +477,9 @@ def run_one(arm, task, n, ctx):
     else:
         result = run_claude(command, work, env, args)
     wall = time.time() - started
+    if result.get("transcript"):
+        (run_dir / "transcript.jsonl").write_text(redact("\n".join(result["transcript"]) + "\n", secrets))
+    calls = result.get("calls") or []
     removed = scrub_work_dir(run_dir, secrets)
     try:
         checks, info = TASKS[task][1](work)
@@ -461,6 +493,10 @@ def run_one(arm, task, n, ctx):
         "passed": all(checks.values()), "checks": checks, "info": info,
         "final_message": redact((result.get("result") or "")[:1500], secrets),
         "usage": result.get("usage"),
+        "tool_calls": len(calls) if result.get("transcript") else None,
+        "skill_read": skill_read(calls) if result.get("transcript") else None,
+        "revise_calls": sum(1 for _, text in calls if re.search(r"(^|[\s;&|(/])revise\s", text))
+                        if result.get("transcript") else None,
     }
     if removed:
         record["redacted_files"] = removed

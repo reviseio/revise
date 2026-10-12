@@ -107,6 +107,9 @@ def section(out, rs, meta):
         ("pandoc", (meta.get("host") or {}).get("pandoc")),
         ("python-docx", (meta.get("host") or {}).get("python_docx")),
     ]
+    traced = [x for x in rs if x["arm"] == "revise" and x.get("skill_read") is not None]
+    if traced:
+        facts.append(("revise arm runs that read the skill", f"{sum(x['skill_read'] for x in traced)}/{len(traced)}"))
     bullets = [f"- {k}: {v}" for k, v in facts if v is not None]
     lines += bullets + [""] if bullets else []
     lines += [HEADER.format("Category")]
