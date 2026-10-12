@@ -1,4 +1,4 @@
-# reviseio
+# revise
 
 The swiss army knife for documents
 

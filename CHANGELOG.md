@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.1.4
+
+### Fixed
+
+- **The package README's heading** reads `revise`.
+
+## 3.1.3
+
+### Changed
+
+- **The package README** has a plain heading and tagline. No changes to the
+  CLI or the library.
+
 ## 3.1.2
 
 ### Changed
