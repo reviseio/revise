@@ -164,6 +164,9 @@ Other options: `--arms`, `--tasks`, `--runs` (default 4), `--timeout` (seconds p
 | `tasks` | blank | Comma-separated task names. If blank, every task whose fixtures exist. |
 | `runs` | `4` | Runs per task per arm |
 | `revise_spec` | `revise@latest` | As `--revise-spec`. Tarballs must be URLs here. |
+| `arms` | `revise,baseline` | Which arms to run |
+| `skill_ref` | blank | With `revise_spec` `source`: take only `src/cli/skills/` from this branch or commit, for an A/B of skill text |
+| `source_ref` | blank | With `revise_spec` `source`: build revise from `src/` at this branch or commit, to measure unreleased changes. The harness and graders stay on the workflow's ref. |
 | `hermes_provider` | `openai-codex` | Hermes `--provider` |
 | `publish` | off | Commit the aggregated results and open a pull request |
 

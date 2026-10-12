@@ -35,6 +35,10 @@ on:
         description: "Take the agent skill (src/cli/skills/) from this branch or commit, for an A/B of skill text; use with revise_spec `source`"
         type: string
         default: ""
+      source_ref:
+        description: "Build revise from src/ at this branch or commit (the harness stays on this ref), to measure unreleased CLI changes; use with revise_spec `source`"
+        type: string
+        default: ""
       hermes_provider:
         description: "Hermes provider"
         type: choice
@@ -77,6 +81,7 @@ jobs:
           TASKS: ${{ inputs.tasks }}
           ARMS: ${{ inputs.arms }}
           SKILL_REF: ${{ inputs.skill_ref }}
+          SOURCE_REF: ${{ inputs.source_ref }}
           REVISE_SPEC: ${{ inputs.revise_spec }}
         run: |
           python3 - <<'EOF'
@@ -98,11 +103,14 @@ jobs:
           arms = [a.strip() for a in os.environ["ARMS"].split(",") if a.strip()]
           if not arms or any(a not in ("revise", "baseline") for a in arms):
               sys.exit("arms must be a comma-separated subset of revise,baseline")
-          ref = os.environ["SKILL_REF"].strip()
-          if ref and not re.fullmatch(r"[\w./-]+", ref):
-              sys.exit("skill_ref must be a branch name or commit")
-          if ref and os.environ["REVISE_SPEC"].strip() != "source":
-              sys.exit("skill_ref needs revise_spec `source`: the skill ships inside the revise build")
+          for name in ("SKILL_REF", "SOURCE_REF"):
+              ref = os.environ[name].strip()
+              if ref and not re.fullmatch(r"[\w./-]+", ref):
+                  sys.exit(f"{name.lower()} must be a branch name or commit")
+              if ref and os.environ["REVISE_SPEC"].strip() != "source":
+                  sys.exit(f"{name.lower()} needs revise_spec `source`: it changes the revise build")
+          if os.environ["SKILL_REF"].strip() and os.environ["SOURCE_REF"].strip():
+              sys.exit("give skill_ref or source_ref, not both: source_ref already includes the skill")
           matrix = [{"agent": a, "model": models.get(a, "")} for a in dict.fromkeys(agents)]
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"matrix={json.dumps(matrix)}\n")
@@ -196,6 +204,18 @@ jobs:
             echo "HERMES_AUTH_FILE=$RUNNER_TEMP/hermes-auth.json" >> "$GITHUB_ENV"
             echo "Hermes: auth.json provided"
           fi
+
+      # Unreleased revise: src/ from another ref, built by the source hook.
+      # The harness, graders, and workflow stay as they are on this ref.
+      - name: Use revise source from another ref
+        if: inputs.source_ref != ''
+        working-directory: .
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          git fetch --depth 1 origin "$SOURCE_REF"
+          git checkout FETCH_HEAD -- src
+          git diff --cached --stat HEAD
 
       # An A/B of skill text: the same revise source, with only the skill
       # folder taken from another ref. Nothing else from that ref runs.

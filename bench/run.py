@@ -495,7 +495,7 @@ def run_one(arm, task, n, ctx):
         "usage": result.get("usage"),
         "tool_calls": len(calls) if result.get("transcript") else None,
         "skill_read": skill_read(calls) if result.get("transcript") else None,
-        "revise_calls": sum(1 for _, text in calls if re.search(r"(^|[\s;&|(/])revise\s", text))
+        "revise_calls": sum(1 for _, text in calls if re.search(r"(^|[\s;&|(/'\"])revise\s", text))
                         if result.get("transcript") else None,
     }
     if removed:
