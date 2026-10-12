@@ -85,7 +85,8 @@ def build_revise_from_source(dest):
     tarball path per line on stdout."""
     if not SOURCE_BUILD_HOOK.exists():
         sys.exit(f"--revise-spec source: {SOURCE_BUILD_HOOK} is missing")
-    proc = subprocess.run([str(SOURCE_BUILD_HOOK), str(HERE.parent), str(dest)], capture_output=True, text=True)
+    # Through sh: a checkout or copy may not keep the executable bit.
+    proc = subprocess.run(["sh", str(SOURCE_BUILD_HOOK), str(HERE.parent), str(dest)], capture_output=True, text=True)
     if proc.returncode != 0:
         sys.exit(f"--revise-spec source: the build hook failed (exit {proc.returncode}):\n{proc.stderr.strip()}")
     tarballs = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
