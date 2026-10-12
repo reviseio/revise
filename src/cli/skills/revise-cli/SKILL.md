@@ -41,6 +41,21 @@ revise render contract.docx --page 3           # page image (needs: npm i -g @na
 revise diff contract.docx                      # text effect of the pending tracked changes
 ```
 
+- **Work in two calls: find, then change and check.** Every extra turn
+  re-reads the whole conversation, and everything a command prints stays in
+  it, so batch your work and keep output small. First find what you need
+  (`outline`, `grep`, `read --blocks`) to get block ids. Then make every edit
+  and comment in one shell call, chained with `&&`, ending with a check of
+  just what you changed, and read it before you answer:
+  ```bash
+  revise call c.docx replace '{"id":"a1B2c3","replacements":[{"find":"30 days","replace":"60 days"}]}' --author Claude &&
+  revise call c.docx leave_comment '{"id":"d4E5f6","anchor":{"text":"99.0%"},"comment":"Ask for 99.9%."}' --author Claude &&
+  revise diff c.docx && revise read c.docx --blocks a1B2c3,d4E5f6
+  ```
+  Commands on one file run in order, ids stay valid across edits, and `&&`
+  stops at the first failure. Don't reread the whole document to check. An
+  edit that needs an earlier one's result (a block you just inserted) goes
+  in the next call.
 - **Save as a new file?** Add `--out redlined.docx` to an edit
   (`replace-all`, `call`, `accept`, `reject`, `xml patch`): the original stays
   as it is, block ids you read from it work on the copy, and later edits go to the
