@@ -30,7 +30,7 @@ import {
   parseBlockQuery,
   type ReadView,
 } from "../lib/document";
-import { relearn } from "../lib/docx";
+import { relearn, type DocxExportOutcome } from "../lib/docx";
 import {
   CliError,
   amendLatestCheckpoint,
@@ -97,6 +97,7 @@ const VALUE_FLAGS = new Set([
   "author",
   "blocks",
   "content",
+  "count",
   "page-size",
   "results-page",
   "dir",
@@ -174,6 +175,15 @@ function flagString(args: ParsedArgs, name: string): string | undefined {
 }
 
 /** --blocks (or its older name, --ids): block ids, comma-separated. */
+/** The ids in a --blocks value, or undefined if it holds a range. */
+function blockIdsList(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  const blocks = parseBlockQuery(value);
+  return blocks.every((b) => typeof b === "string")
+    ? (blocks as string[])
+    : undefined;
+}
+
 function blockIdsFlag(args: ParsedArgs, command: string): string[] | undefined {
   const value = flagString(args, "blocks") ?? flagString(args, "ids");
   if (value === undefined) return undefined;
@@ -521,6 +531,8 @@ interface LoadedDocument {
   doc: ReviseDocument;
   /** The file as the person named it, ready to paste into a command. */
   shown: string;
+  /** How this command's save wrote a .docx (savedLine reports it). */
+  saved?: DocxExportOutcome | null;
 }
 
 const DEFAULT_AUTHOR = "Agent";
@@ -682,12 +694,18 @@ async function exportBytes(
   ydoc: Y.Doc,
   pkg: Uint8Array | null,
 ): Promise<Uint8Array> {
-  return (
-    await exportYDoc(ydoc, pkg, {
-      format: formatForPath(meta.file) ?? "txt",
-      title: path.basename(meta.file).replace(/\.[^.]+$/, ""),
-    })
-  ).bytes;
+  return (await exportFile(meta, ydoc, pkg)).bytes;
+}
+
+function exportFile(
+  meta: CliDocumentMeta,
+  ydoc: Y.Doc,
+  pkg: Uint8Array | null,
+): Promise<{ bytes: Uint8Array; outcome: DocxExportOutcome | null }> {
+  return exportYDoc(ydoc, pkg, {
+    format: formatForPath(meta.file) ?? "txt",
+    title: path.basename(meta.file).replace(/\.[^.]+$/, ""),
+  });
 }
 
 /**
@@ -826,11 +844,12 @@ async function mutate<T>(
   }
   // Only a real change needs a writable file; reads through tools pass.
   assertWritable(loaded.meta);
-  const bytes = await exportBytes(
+  const { bytes, outcome } = await exportFile(
     loaded.meta,
     loaded.doc.ydoc,
     loaded.doc.package,
   );
+  loaded.saved = outcome;
   const state = encodeYDoc(loaded.doc.ydoc);
   const checkpoint = await saveJournaled(loaded.meta, bytes, (fileHash) =>
     stageCommit(
@@ -848,9 +867,16 @@ function currentCheckpoint(meta: CliDocumentMeta): number {
   return meta.checkpoints.at(-1)?.n ?? 0;
 }
 
-/** "Saved contract.docx (checkpoint 3). Undo: revise undo contract.docx" */
+/** "Saved contract.docx (checkpoint 3). Undo: revise undo contract.docx",
+ * and for a Word file, how much of it the save rewrote: agents otherwise
+ * unzip the file to check that nothing else changed. */
 function savedLine(loaded: LoadedDocument, checkpoint: number): string {
-  return `${ui.green("Saved")} ${loaded.shown} (checkpoint ${checkpoint}). ${ui.dim("Undo:")} ${ui.cyan(`revise undo ${loaded.shown}`)}`;
+  const line = `${ui.green("Saved")} ${loaded.shown} (checkpoint ${checkpoint}). ${ui.dim("Undo:")} ${ui.cyan(`revise undo ${loaded.shown}`)}`;
+  const saved = loaded.saved;
+  if (!saved || saved.method !== "graft") return line;
+  return `${line}\n${ui.dim(
+    `Rewrote ${plural(saved.regeneratedBlocks, "edited block")}; the rest of the file is copied byte for byte. No need to check it with other tools.`,
+  )}`;
 }
 
 /** "Next: revise changes contract.docx" */
@@ -960,10 +986,19 @@ function stringsIn(value: unknown, into: Set<string> = new Set()): Set<string> {
 async function restoreReadContext(
   loaded: LoadedDocument,
   input: ReviseJsonObject,
+  name?: string,
 ): Promise<void> {
   const read = new Set(loaded.meta.readBlockIds ?? []);
   if (!read.size) return;
-  const targets = Array.from(stringsIn(input)).filter((s) => read.has(s));
+  // replace without an id edits whichever shown block each find matches:
+  // every block the agent was shown is in play, as in one session.
+  const anyShown =
+    name === "replace" &&
+    input.id === undefined &&
+    input.search_result_id === undefined;
+  const targets = anyShown
+    ? Array.from(read).slice(-500)
+    : Array.from(stringsIn(input)).filter((s) => read.has(s));
   if (!targets.length) return;
   await loaded.doc.session.tools.executeDynamic("read_specific_blocks", {
     block_ids: targets,
@@ -1032,7 +1067,7 @@ async function runTool(
   if (required.includes("context_notes") && input.context_notes === undefined) {
     input = { ...input, context_notes: "N/A" };
   }
-  if (!READ_TOOLS.has(name)) await restoreReadContext(loaded, input);
+  if (!READ_TOOLS.has(name)) await restoreReadContext(loaded, input, name);
   // search_result_id names a result set held in process memory. Each CLI call
   // is a new process, so replay the saved search first (against the current
   // document) and point the call at the fresh in-process id.
@@ -1186,7 +1221,7 @@ async function runTool(
         );
       }
       if (checkpoint !== null) lines.push(savedLine(loaded, checkpoint));
-      if (html) lines.push("", html);
+      if (html) lines.push("", loaded.doc.compactHtml(html));
       else if (
         value.data &&
         typeof value.data === "object" &&
@@ -1270,6 +1305,44 @@ function summaryText(summary: ReturnType<typeof summaryData>): string {
     lines.push(plural(summary.trackedChangeCount, "tracked change"));
   }
   return lines.join("\n");
+}
+
+/** "5 pages, US Letter" for a PDF revise wrote: agents otherwise look for
+ * pdfinfo or a PDF library to check it. Null when the file doesn't say. */
+export function pdfPagesText(bytes: Uint8Array): string | null {
+  const text = Buffer.from(bytes).toString("latin1");
+  const counts = Array.from(text.matchAll(/\/Count\s+(\d+)/g), (m) =>
+    Number(m[1]),
+  );
+  if (!counts.length) return null;
+  const pages = Math.max(...counts);
+  const sizes = new Set(
+    Array.from(
+      text.matchAll(
+        /\/MediaBox\s*\[\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*\]/g,
+      ),
+      (m) => {
+        const w = Number(m[3]) - Number(m[1]);
+        const h = Number(m[4]) - Number(m[2]);
+        const near = (a: number, b: number) => Math.abs(a - b) < 3;
+        const named = [
+          ["US Letter", 612, 792],
+          ["US Legal", 612, 1008],
+          ["A4", 595, 842],
+          ["A5", 420, 595],
+        ] as const;
+        for (const [name, pw, ph] of named) {
+          if (near(w, pw) && near(h, ph)) return name;
+          if (near(w, ph) && near(h, pw)) return `${name} landscape`;
+        }
+        return `${(w / 72).toFixed(2)} × ${(h / 72).toFixed(2)} in`;
+      },
+    ),
+  );
+  return [
+    plural(pages, "page"),
+    ...(sizes.size ? [[...sizes].join(" and ")] : []),
+  ].join(", ");
 }
 
 function sizeText(bytes: number): string {
@@ -1553,9 +1626,34 @@ async function cmdStatus(args: ParsedArgs): Promise<Outcome> {
 
 async function cmdRead(args: ParsedArgs): Promise<Outcome> {
   const loaded = await loadDocument(args);
-  const ids = blockIdsFlag(args, "read");
+  const blocks = flagString(args, "blocks") ?? flagString(args, "ids");
+  const section = flagString(args, "section");
+  const count = flagInt(args, "count");
   const view = viewFlag(args, "tracked");
-  if (ids) {
+  const index = strictInt(args.positional[0] ?? "0", "The block index");
+  if (count !== undefined && count < 1) {
+    throw fail("--count must be 1 or more.", "usage");
+  }
+  if (
+    (blocks !== undefined || section !== undefined) &&
+    (count !== undefined || args.positional[0] !== undefined)
+  ) {
+    throw fail(
+      "Read a selection (--blocks or --section) or an index (with --count), not both.",
+      "usage",
+      "revise read --help",
+    );
+  }
+  if (blocks !== undefined || section !== undefined || count !== undefined) {
+    // Plain ids go to the tool as they are: it reads the ones it finds and
+    // names any it can't. Ranges, sections, and counts resolve to ids first.
+    const plain =
+      section === undefined && count === undefined
+        ? blockIdsList(blocks)
+        : undefined;
+    const ids =
+      plain ??
+      (await loaded.doc.selectBlocks({ blocks, section, index, count }));
     return runTool(
       loaded,
       "read_specific_blocks",
@@ -1563,7 +1661,6 @@ async function cmdRead(args: ParsedArgs): Promise<Outcome> {
       { view },
     );
   }
-  const index = strictInt(args.positional[0] ?? "0", "The block index");
   return runTool(loaded, "read_blocks_from_index", { index }, { view });
 }
 
@@ -1707,6 +1804,7 @@ async function cmdOutline(args: ParsedArgs): Promise<Outcome> {
   const nextOffset = data.hasMoreSections
     ? (data.nextSectionOffset ?? null)
     : null;
+  const unstyled = await loaded.doc.unstyledHeadings();
   return {
     data: {
       file: loaded.meta.file,
@@ -1715,14 +1813,33 @@ async function cmdOutline(args: ParsedArgs): Promise<Outcome> {
       sectionCount: data.sectionCount ?? sections.length,
       sections,
       nextOffset,
+      unstyledHeadings: unstyled.map(({ id, blockIndex, text }) => ({
+        blockId: id,
+        blockIndex,
+        text,
+      })),
     },
     text: () => {
       const lines = [
         `${plural(data.totalBlocks, "block")}, ${plural(data.wordCount, "word")}.`,
       ];
+      // First, where it can't be missed under a long outline.
+      if (unstyled.length) {
+        lines.push(
+          `Look like headings but are body text (bold, numbered like the headings):`,
+          ...unstyled.map(
+            (u) =>
+              `  ${u.text}  ${ui.dim(`block ${u.blockIndex}`)}  ${ui.cyan(u.id)}`,
+          ),
+          ui.dim(
+            `Make one a heading: revise call ${loaded.shown} style_blocks '{"selectors":["#${unstyled[0].id}"],"attrs":[{"name":"heading","value":"${unstyled[0].level}"}]}' (add --direct for no tracked change, --out <new.docx> to save a copy)`,
+          ),
+          "",
+        );
+      }
       for (const section of sections) {
         lines.push(
-          `${"  ".repeat(section.level - 1)}${ui.bold(section.title)}  ${ui.dim(`blocks ${section.startIndex}–${section.endIndex}, ${plural(section.wordCount, "word")}`)}  ${ui.cyan(section.startBlockId)}`,
+          `${"  ".repeat(section.level - 1)}${ui.bold(section.title)}  ${ui.cyan(section.startBlockId === section.endBlockId ? section.startBlockId : `${section.startBlockId}..${section.endBlockId}`)}  ${ui.dim(plural(section.wordCount, "word"))}`,
         );
       }
       if (!sections.length) lines.push("No headings.");
@@ -1802,6 +1919,151 @@ async function cmdCall(args: ParsedArgs): Promise<Outcome> {
   return runTool(loaded, name, readInputJson(args.positional[1]), {
     direct: args.flags.direct === true,
   });
+}
+
+/**
+ * Several edits in one command and one save: a list of tool calls, each
+ * `{"tool": name, ...its input}`, plus `{"tool": "replace_all", "find",
+ * "replace"}`. They run in order on the same document; if one fails,
+ * nothing is saved. An agent otherwise spends a turn per edit when the
+ * edits need different tools (a table row and the total under it).
+ */
+async function cmdBatch(args: ParsedArgs): Promise<Outcome> {
+  const raw = args.positional[0];
+  if (raw === undefined) throw usageError("batch");
+  let text = raw;
+  if (raw === "-") text = fs.readFileSync(0, "utf8");
+  else if (raw.startsWith("@")) text = fs.readFileSync(raw.slice(1), "utf8");
+  let steps: ReviseJsonObject[];
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.length ||
+      !parsed.every(
+        (step) =>
+          step &&
+          typeof step === "object" &&
+          !Array.isArray(step) &&
+          typeof (step as { tool?: unknown }).tool === "string",
+      )
+    ) {
+      throw new Error('a list of {"tool": name, ...input}');
+    }
+    steps = parsed as ReviseJsonObject[];
+  } catch (error) {
+    throw fail(
+      `batch takes a JSON list of steps, each {"tool": name, ...its input} (${(error as Error).message}).`,
+      "invalid_json",
+      "revise batch --help",
+    );
+  }
+  const loaded = await loadDocument(args);
+  const direct = args.flags.direct === true;
+  const done: Array<{ tool: string; message: string; changeIds: string[] }> =
+    [];
+  let failure: {
+    step: number;
+    tool: string;
+    message: string;
+    code: string;
+  } | null = null;
+  const { checkpoint } = await mutate(
+    loaded,
+    "batch",
+    async () => {
+      for (const [index, step] of steps.entries()) {
+        const { tool, ...input } = step as { tool: string } & ReviseJsonObject;
+        if (tool === "replace_all") {
+          const find = input.find;
+          const replace = input.replace;
+          if (typeof find !== "string" || typeof replace !== "string") {
+            failure = {
+              step: index + 1,
+              tool,
+              message: 'replace_all takes "find" and "replace".',
+              code: "usage",
+            };
+            return;
+          }
+          const result = await loaded.doc.replaceAll(find, replace, {
+            ignoreCase: input.ignoreCase === true,
+            exact: input.exact === true,
+          });
+          if (result.failures.length) {
+            failure = {
+              step: index + 1,
+              tool,
+              message: result.failures[0].message,
+              code: result.failures[0].code,
+            };
+            return;
+          }
+          done.push({
+            tool,
+            message: `Replaced ${plural(result.replaced, "occurrence")} of "${find}" in ${plural(result.blocks.length, "block")}.`,
+            changeIds: result.changeIds,
+          });
+          continue;
+        }
+        await restoreReadContext(loaded, input, tool);
+        const result = await loaded.doc.tools.run(tool, input, { direct });
+        if ("error" in result) {
+          failure = {
+            step: index + 1,
+            tool,
+            message: result.error.message,
+            code: result.error.code ?? "tool_error",
+          };
+          return;
+        }
+        done.push({
+          tool,
+          message: cliVocabulary(
+            result.value.message ?? tool,
+            loaded.shown,
+          ).trimEnd(),
+          changeIds: result.value.suggestionIds ?? [],
+        });
+      }
+    },
+    () => `${steps.length} steps: ${steps.map((s) => s.tool).join(", ")}`,
+    { saveIf: () => failure === null },
+  );
+  if (failure) {
+    const f = failure as {
+      step: number;
+      tool: string;
+      message: string;
+      code: string;
+    };
+    throw fail(
+      `Step ${f.step} (${f.tool}) failed: ${f.message} Nothing was saved.`,
+      f.code,
+      `revise ${f.tool === "replace_all" ? "replace-all" : f.tool} --help`,
+      { step: f.step, tool: f.tool },
+    );
+  }
+  const changeIds = done.flatMap((step) => step.changeIds);
+  return {
+    data: {
+      file: loaded.meta.file,
+      saved: checkpoint !== null,
+      checkpoint: checkpoint ?? currentCheckpoint(loaded.meta),
+      steps: done,
+      changeIds,
+    },
+    text: () =>
+      [
+        ...done.map((step, i) => `${i + 1}. ${step.message}`),
+        ...(changeIds.length
+          ? [`${plural(changeIds.length, "tracked change")}.`]
+          : []),
+        ...(checkpoint !== null
+          ? [savedLine(loaded, checkpoint)]
+          : ["Already matches: nothing to change. File not rewritten."]),
+      ].join("\n"),
+  };
 }
 
 async function cmdMode(args: ParsedArgs): Promise<Outcome> {
@@ -1975,7 +2237,9 @@ async function cmdSettle(args: ParsedArgs, accept: boolean): Promise<Outcome> {
         ...(notFound.length
           ? [`Not pending: ${notFound.map((id) => ui.cyan(id)).join(", ")}`]
           : []),
-        "Nothing changed (dry run).",
+        flagString(args, "out") !== undefined
+          ? `Nothing changed (dry run). Without --dry-run, the result goes to ${flagString(args, "out")}.`
+          : "Nothing changed (dry run).",
       ].join("\n");
     if (notFound.length) {
       return {
@@ -2315,7 +2579,7 @@ async function cmdExport(args: ParsedArgs): Promise<Outcome> {
     },
     text: () =>
       [
-        `${ui.green("Wrote")} ${shellArg(target)} (${sizeText(result.bytes.length)}${result.view === "original" ? ", as it was before the tracked changes" : result.mode === "final" ? ", tracked changes accepted" : ""}).`,
+        `${ui.green("Wrote")} ${shellArg(target)} (${sizeText(result.bytes.length)}${format === "pdf" && pdfPagesText(result.bytes) ? `, ${pdfPagesText(result.bytes)}` : ""}${result.view === "original" ? ", as it was before the tracked changes" : result.mode === "final" ? ", tracked changes accepted" : ""}).`,
         ...(summary ? [summaryText(summary)] : []),
         ...(format === "docx" && trackedChangeCount
           ? [
@@ -2492,6 +2756,43 @@ async function cmdCompare(args: ParsedArgs): Promise<Outcome> {
     document.package,
   );
   writeOutput(args, out, bytes);
+  // What differs where tracked changes can't go, so nobody has to dig it
+  // out of the XML: header and footer text, and page setup.
+  const untrackedDetails: string[] = [];
+  if (untrackedRegions.length) {
+    const before = await ReviseDocument.open(originalFile);
+    try {
+      const was = (await before.summary()).data;
+      const now = (await document.summary()).data;
+      const slots = new Map<string, [string, string]>();
+      for (const h of was.headersFooters) {
+        slots.set(`${h.side} (${h.slot})`, [h.text, ""]);
+      }
+      for (const h of now.headersFooters) {
+        const key = `${h.side} (${h.slot})`;
+        slots.set(key, [slots.get(key)?.[0] ?? "", h.text]);
+      }
+      for (const [slot, [from, to]] of slots) {
+        if (from !== to) {
+          untrackedDetails.push(
+            `${slot}: ${from ? `"${from}"` : "nothing"} → ${to ? `"${to}"` : "nothing"}`,
+          );
+        }
+      }
+      const setup = (d: typeof was) =>
+        `${d.pageSize} ${d.orientation}, margins ${d.marginsInches.join("/")} in`;
+      if (setup(was) !== setup(now)) {
+        untrackedDetails.push(`page setup: ${setup(was)} → ${setup(now)}`);
+      }
+      if (!untrackedDetails.length) {
+        untrackedDetails.push(
+          "Their text, page size, orientation, and margins are the same: the rest is formatting (fonts, spacing, layout details), and the redline has the revised file's.",
+        );
+      }
+    } finally {
+      before.dispose();
+    }
+  }
   const fileHash = hashFileBytes(bytes);
   createDocumentRecord(
     { ...record, fileHash },
@@ -2502,8 +2803,8 @@ async function cmdCompare(args: ParsedArgs): Promise<Outcome> {
   if (untrackedRegions.length) {
     warn(
       "untracked_regions",
-      `Also different, but can't carry tracked changes (taken from the revised file): ${untrackedRegions.join(", ")}.`,
-      { regions: untrackedRegions },
+      `Also different, but can't carry tracked changes (taken from the revised file): ${untrackedRegions.join(", ")}.${untrackedDetails.length ? `\n  ${untrackedDetails.join("\n  ")}` : ""}`,
+      { regions: untrackedRegions, details: untrackedDetails },
     );
   }
   const shownOut = shellArg(outArg);
@@ -2569,15 +2870,23 @@ async function cmdCompare(args: ParsedArgs): Promise<Outcome> {
 }
 
 async function cmdGrep(args: ParsedArgs): Promise<Outcome> {
-  const pattern = args.positional[0];
+  // Several patterns find blocks matching any of them: one call where an
+  // agent would otherwise grep once per phrase.
+  const patterns = args.positional.filter((p) => p !== "");
+  const pattern = patterns[0];
   if (!pattern) throw usageError("grep");
   const loaded = await loadDocument(args);
   const ignoreCase = args.flags["ignore-case"] === true;
   const regex = args.flags.regex === true;
   let matcher: string | RegExp = pattern;
-  if (regex) {
+  if (regex || patterns.length > 1) {
+    const source = patterns
+      .map((p) =>
+        regex ? `(?:${p})` : p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      )
+      .join("|");
     try {
-      matcher = new RegExp(pattern, ignoreCase ? "gi" : "g");
+      matcher = new RegExp(source, ignoreCase ? "gi" : "g");
     } catch (error) {
       throw fail(
         `Not a valid regular expression: ${(error as Error).message.replace(/^Invalid regular expression: /, "")}.`,
@@ -2597,6 +2906,7 @@ async function cmdGrep(args: ParsedArgs): Promise<Outcome> {
     data: {
       file: loaded.meta.file,
       pattern,
+      ...(patterns.length > 1 ? { patterns } : {}),
       regex,
       ignoreCase,
       view,
@@ -2612,10 +2922,24 @@ async function cmdGrep(args: ParsedArgs): Promise<Outcome> {
     text: () =>
       hits.length
         ? [
-            ...hits.map(
+            ...hits.slice(0, GREP_SHOWN).map(
               (hit) =>
-                `${ui.cyan(hit.id)}  ${highlight(hit.text, matcher, ignoreCase)}${inChanges(hit.matches)}`,
+                `${ui.cyan(hit.id)}  ${highlight(
+                  excerpt(
+                    hit.text,
+                    hit.matches.map((m) => m.text),
+                  ),
+                  matcher,
+                  ignoreCase,
+                )}${inChanges(hit.matches)}`,
             ),
+            ...(hits.length > GREP_SHOWN
+              ? [
+                  ui.dim(
+                    `… and ${plural(hits.length - GREP_SHOWN, "more block")}. Search for something more specific, or add --json for all of them.`,
+                  ),
+                ]
+              : []),
             "",
             `${plural(matchCount, "match", "matches")} in ${plural(hits.length, "block")}.`,
             nextLine(
@@ -2624,7 +2948,7 @@ async function cmdGrep(args: ParsedArgs): Promise<Outcome> {
               `revise call ${loaded.shown} replace '{"id":"<block-id>","replacements":[{"find":"…","replace":"…"}]}'`,
             ),
           ].join("\n")
-        : `No matches for "${pattern}".`,
+        : `No matches for ${patterns.map((p) => `"${p}"`).join(" or ")}.`,
   };
 }
 
@@ -2640,6 +2964,57 @@ function inChanges(matches: Array<{ change: string | null }>): string {
 }
 
 /** Matches in bold, when color is on. */
+/** Blocks grep lists in full before it stops: a short search on a long
+ * document otherwise prints most of it. --json has every block. */
+const GREP_SHOWN = 40;
+/** Characters of context grep shows on each side of a match. */
+const GREP_CONTEXT = 80;
+
+/** A long block as the passages around its matches, "…" where text is
+ * left out; a short one whole. */
+export function excerpt(text: string, needles: string[]): string {
+  if (text.length <= GREP_CONTEXT * 3) return text;
+  const windows: Array<[number, number]> = [];
+  let from = 0;
+  for (const needle of needles) {
+    if (!needle) continue;
+    let at = text.indexOf(needle, from);
+    if (at < 0) at = text.indexOf(needle);
+    if (at < 0) continue;
+    from = at + needle.length;
+    windows.push([
+      Math.max(0, at - GREP_CONTEXT),
+      Math.min(text.length, at + needle.length + GREP_CONTEXT),
+    ]);
+  }
+  if (!windows.length) return text;
+  windows.sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const w of windows) {
+    const last = merged.at(-1);
+    if (last && w[0] <= last[1]) last[1] = Math.max(last[1], w[1]);
+    else merged.push([...w]);
+  }
+  // Widen each passage to the nearest word boundary.
+  const start = (i: number) => {
+    if (i === 0) return 0;
+    const space = text.lastIndexOf(" ", i);
+    return space < 0 ? i : space + 1;
+  };
+  const end = (i: number) => {
+    if (i >= text.length) return text.length;
+    const space = text.indexOf(" ", i);
+    return space < 0 ? text.length : space;
+  };
+  return merged
+    .map(([a, b], i) => {
+      const s = start(a);
+      const e = end(b);
+      return `${s > 0 && i === 0 ? "…" : ""}${text.slice(s, e)}${e < text.length ? "…" : ""}`;
+    })
+    .join(" ");
+}
+
 function highlight(
   text: string,
   matcher: string | RegExp,
@@ -2984,6 +3359,7 @@ const RENAMED_COMMANDS: Record<string, string> = {
 const OUT_COMMANDS = new Set([
   "replace-all",
   "call",
+  "batch",
   "accept",
   "reject",
   "xml patch",
@@ -3016,12 +3392,6 @@ async function copyForOut(args: ParsedArgs): Promise<OutCopy> {
   const fromShown = args.file!;
   const input = canonicalPath(requireFile(args));
   const outArg = flagString(args, "out")!;
-  if (args.flags["dry-run"] === true) {
-    throw fail(
-      "--dry-run saves nothing, so there is no copy to write. Drop --out.",
-      "usage",
-    );
-  }
   const ext = path.extname(input).toLowerCase();
   if (path.extname(outArg).toLowerCase() !== ext) {
     throw fail(
@@ -3193,11 +3563,17 @@ const COMMAND_HELP: CommandHelp[] = [
   {
     name: "read",
     group: "Reading",
-    usage: "revise read <file> [<index>] [--blocks <id,id>] [--view <view>]",
+    usage:
+      "revise read <file> [<index> [--count <n>]] [--blocks <ids>] [--section <heading>] [--view <view>]",
     summary: "Blocks as HTML with block ids; pending changes as <ins>/<del>",
     options: [
       ["<index>", "Block index to start from (0-based, default 0)"],
-      ["--blocks <id,id>", "Read these blocks instead"],
+      ["--count <n>", "Read n blocks from the index"],
+      ["--blocks <ids>", "Read these blocks instead: id,id or first..last"],
+      [
+        "--section <heading>",
+        'Read a section: "8", "8.1", its title, or several: "4,7,9"',
+      ],
       VIEW_OPTION,
     ],
   },
@@ -3205,7 +3581,7 @@ const COMMAND_HELP: CommandHelp[] = [
     name: "grep",
     group: "Reading",
     usage:
-      'revise grep <file> "<text>" [--regex] [--ignore-case] [--view <view>]',
+      'revise grep <file> "<text>" ["<text>"…] [--regex] [--ignore-case] [--view <view>]',
     summary: "Matching blocks as plain text with ids",
     options: [
       ["--regex", "Treat the text as a JavaScript regular expression"],
@@ -3254,6 +3630,20 @@ const COMMAND_HELP: CommandHelp[] = [
     options: [
       ["'<json>'", "Tool input; - reads stdin, @file reads a file"],
       ["--direct", "Apply this call directly, even in suggest mode"],
+      OUT_OPTION,
+    ],
+  },
+  {
+    name: "batch",
+    group: "Editing (saves the file)",
+    usage: "revise batch <file> ['<json list>' | - | @<file.json>] [--direct]",
+    summary: "Several edits in one save; if one fails, none is saved",
+    options: [
+      [
+        "'<json list>'",
+        '[{"tool":"insert_table_row",...},{"tool":"replace",...},{"tool":"replace_all","find":"…","replace":"…"}]',
+      ],
+      ["--direct", "Apply these edits directly, even in suggest mode"],
       OUT_OPTION,
     ],
   },
@@ -3558,6 +3948,7 @@ const FILE_COMMANDS = new Set([
   "search",
   "replace-all",
   "call",
+  "batch",
   "mode",
   "changes",
   "diff",
@@ -3900,8 +4291,11 @@ export async function main(argv: string[], cliIo?: CliIo): Promise<number> {
       args.file = args.positional.shift();
     }
     const dispatch = resolved;
+    // A dry run with --out previews on the original: there is nothing to copy.
     const copying =
-      OUT_COMMANDS.has(dispatch) && flagString(args, "out") !== undefined;
+      OUT_COMMANDS.has(dispatch) &&
+      flagString(args, "out") !== undefined &&
+      args.flags["dry-run"] !== true;
     let copy: OutCopy | null = null;
     const run = async (): Promise<Outcome> => {
       if (copying) copy = await copyForOut(args);
@@ -3920,6 +4314,8 @@ export async function main(argv: string[], cliIo?: CliIo): Promise<number> {
           return cmdTools(args);
         case "call":
           return cmdCall(args);
+        case "batch":
+          return cmdBatch(args);
         case "mode":
           return cmdMode(args);
         case "changes":

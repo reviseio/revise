@@ -1,5 +1,49 @@
 # Changelog
 
+## 3.1.5
+
+Agents finish document tasks in fewer commands. Measured on the revise
+benchmark, Claude Code and Codex finish its tasks for about 40% less with
+revise than without it.
+
+### Added
+
+- **`revise batch <file> '[...]'`** runs several tool calls (for example a
+  table row and the total under it, or a `replace_all` and a `replace`) as one
+  edit with one save. If any step fails, nothing is saved.
+- **`read --section 4,7,9`** reads several sections at once, `--blocks a..b`
+  reads a range of ids, and `--count N` limits how many blocks are shown.
+- **`grep` takes several phrases** and shows about 80 characters around each
+  match instead of the whole block (at most 40 blocks).
+- **`outline` lists headings typed as bold body text** first, each with the
+  command that turns it into a real heading.
+- **PDF exports print the page count and paper size.**
+
+### Changed
+
+- **One `replace` call can edit several blocks:** leave out `id` and each
+  `find` edits the one block you've read or grepped that contains it.
+- **Saves say what they rewrote:** "Rewrote N edited blocks; the rest of the
+  file is copied byte for byte."
+- **`read` output is shorter:** it leaves out formatting that writing the
+  block back restores anyway (a heading's own style, default table cell
+  borders and padding, and the like).
+- **`outline` shows one id range per section** (`first..last`) and its word
+  count.
+- **`compare` says what differs outside the redline:** header and footer
+  text and page setup, or that the rest is formatting only.
+- **`--dry-run` with `--out`** previews instead of failing.
+- **The agent skill is a third shorter** and lists every field of `replace`
+  and `leave_comment`, so agents don't need to look them up.
+
+### Fixed
+
+- **`read --blocks a,b`** shows only those blocks, not every block between
+  them.
+- **`outline` and `read --section`** see every section, not just the first 100.
+- **Rows added with `insert_table_row`** take the alignment, spacing,
+  indents, and font of the row they're copied from.
+
 ## 3.1.4
 
 ### Fixed

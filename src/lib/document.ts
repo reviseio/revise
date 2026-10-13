@@ -834,16 +834,383 @@ export class ReviseDocument {
     options: { limit?: number; offset?: number } = {},
   ): Promise<ReviseDocumentMeasurementData> {
     return this.serial(async () => {
+      // Without a limit, every section: the tool pages at 100.
+      if (options.limit === undefined) {
+        return this.allSections(options.offset ?? 0);
+      }
       const measured = await this.currentSession.tools.call(
         "measure_document",
         {
           include_sections: true,
-          section_limit: options.limit ?? 200,
+          section_limit: options.limit,
           section_offset: options.offset ?? 0,
         },
       );
       return measured.data;
     });
+  }
+
+  /** measure_document with every section from `offset` on, page by page. */
+  private async allSections(
+    offset = 0,
+  ): Promise<ReviseDocumentMeasurementData> {
+    let data: ReviseDocumentMeasurementData | undefined;
+    const sections: NonNullable<ReviseDocumentMeasurementData["sections"]> = [];
+    let next: number | null = offset;
+    // A cap a real document won't reach, so a bad page can't loop forever.
+    for (let page = 0; next !== null && page < 50; page++) {
+      const measured: { data: ReviseDocumentMeasurementData } =
+        await this.currentSession.tools.call("measure_document", {
+          include_sections: true,
+          section_limit: 100,
+          section_offset: next,
+        });
+      data ??= measured.data;
+      sections.push(...(measured.data.sections ?? []));
+      const after: number | null = measured.data.hasMoreSections
+        ? (measured.data.nextSectionOffset ?? null)
+        : null;
+      next = after !== null && after > next ? after : null;
+    }
+    return {
+      ...data!,
+      sections,
+      hasMoreSections: false,
+      nextSectionOffset: undefined,
+    } as ReviseDocumentMeasurementData;
+  }
+
+  /**
+   * The top-level blocks a selection names, in document order: block ids
+   * and `first..last` ranges (a nested id stands for the block holding it),
+   * a section (its heading's range, subsections included; "4,7,9" for
+   * several), or `count`
+   * blocks from `index`. Naming a block or section that doesn't exist is an
+   * error.
+   */
+  selectBlocks(selection: {
+    blocks?: string;
+    section?: string;
+    index?: number;
+    count?: number;
+  }): Promise<string[]> {
+    return this.serial(async () => {
+      const top = ydocToDocument(this.currentYDoc).children;
+      const position = new Map<string, number>();
+      top.forEach((block, at) => {
+        const visit = (node: unknown) => {
+          if (!node || typeof node !== "object") return;
+          const n = node as {
+            id?: unknown;
+            type?: string;
+            children?: unknown[];
+          };
+          if (typeof n.id === "string" && n.type !== "text") {
+            position.set(n.id, at);
+          }
+          n.children?.forEach(visit);
+        };
+        visit(block);
+      });
+      const at = (id: string) => {
+        const found = position.get(id);
+        if (found === undefined) {
+          throw new ReviseError(`No block with id "${id}".`, "block_not_found");
+        }
+        return found;
+      };
+      const picked = new Set<number>();
+      const range = (from: number, to: number) => {
+        for (let i = from; i <= to; i++) picked.add(i);
+      };
+      for (const item of selection.blocks
+        ? parseBlockQuery(selection.blocks)
+        : []) {
+        if (typeof item === "string") {
+          picked.add(at(item));
+          continue;
+        }
+        const from = at(item.from);
+        const to = at(item.to);
+        if (from > to) {
+          throw new ReviseError(
+            `Block "${item.from}" comes after "${item.to}"; write the range first..last.`,
+            "invalid_selection",
+          );
+        }
+        range(from, to);
+      }
+      if (selection.section !== undefined) {
+        const measured = { data: await this.allSections() };
+        const sections = (measured.data.sections ?? []).map((s) => ({
+          title: s.title,
+          start: at(s.startBlockId),
+          end: at(s.endBlockId),
+        }));
+        // "4,7,9" names several sections; a title may hold a comma.
+        const queries = /^[\d.\s]+(,[\d.\s]+)+$/.test(selection.section)
+          ? selection.section.split(",").map((part) => part.trim())
+          : [selection.section];
+        for (const query of queries) {
+          const q = query.trim().toLowerCase();
+          const exact = sections.filter(
+            (s) =>
+              s.title.toLowerCase() === q ||
+              s.title.toLowerCase().replace(/^[\d.]+[.)]?\s+/, "") === q,
+          );
+          const candidates = exact.length
+            ? exact
+            : sections.filter((s) => headingMatches(s.title, query));
+          // Subsections of a match are already inside it.
+          const matched = candidates.filter(
+            (s) =>
+              !candidates.some(
+                (outer) =>
+                  outer !== s &&
+                  outer.start <= s.start &&
+                  s.end <= outer.end &&
+                  (outer.start < s.start || s.end < outer.end),
+              ),
+          );
+          if (matched.length > 1) {
+            throw new ReviseError(
+              `"${query}" matches ${matched.length} headings: ${matched
+                .map((s) => `"${s.title}"`)
+                .join(", ")}. Name one by its number or full title.`,
+              "section_ambiguous",
+            );
+          }
+          if (!matched.length) {
+            throw new ReviseError(
+              sections.length
+                ? `No heading matches "${query}". Headings: ${sections
+                    .slice(0, 12)
+                    .map((s) => `"${s.title}"`)
+                    .join(", ")}${sections.length > 12 ? ", …" : ""}.`
+                : `No heading matches "${query}": the document has no headings. Select blocks by id instead.`,
+              "section_not_found",
+            );
+          }
+          range(matched[0].start, matched[0].end);
+        }
+      }
+      if (selection.count !== undefined) {
+        const from = selection.index ?? 0;
+        range(from, Math.min(top.length, from + selection.count) - 1);
+      }
+      return [...picked].sort((a, b) => a - b).map((i) => top[i].id);
+    });
+  }
+
+  /**
+   * Paragraphs that look like section headings but aren't styled as
+   * headings: short, entirely bold, and numbered like the document's real
+   * headings ("12. Overtime" between headings 11 and 13) with a number no
+   * heading has. Word documents often have one typed by hand.
+   */
+  unstyledHeadings(): Promise<
+    Array<{ id: string; blockIndex: number; text: string; level: number }>
+  > {
+    return this.serial(async () => {
+      const top = ydocToDocument(this.currentYDoc).children as Array<{
+        id: string;
+        type: string;
+        heading?: number;
+        children?: Array<{
+          type: string;
+          text?: string;
+          marks?: { bold?: boolean };
+        }>;
+      }>;
+      const textOf = (block: (typeof top)[number]) =>
+        (block.children ?? [])
+          .map((node) => (node.type === "text" ? (node.text ?? "") : ""))
+          .join("")
+          .trim();
+      // "12." or "4.2" at the start of a title, with what follows it.
+      const numberOf = (title: string) => {
+        const m = /^(\d+(?:\.\d+)*)([.)]?)\s+\S/.exec(title);
+        return m ? { number: m[1], mark: m[2] } : undefined;
+      };
+      const headings = top.filter((block) => block.heading !== undefined);
+      // Per depth: the numbers headings use, and how they're written.
+      const used = new Map<number, { numbers: Set<string>; mark: string }>();
+      for (const heading of headings) {
+        const n = numberOf(textOf(heading));
+        if (!n) continue;
+        const depth = n.number.split(".").length;
+        const entry = used.get(depth) ?? { numbers: new Set(), mark: n.mark };
+        entry.numbers.add(n.number);
+        used.set(depth, entry);
+      }
+      const found: Array<{
+        id: string;
+        blockIndex: number;
+        text: string;
+        level: number;
+      }> = [];
+      top.forEach((block, blockIndex) => {
+        if (block.type !== "paragraph" || block.heading !== undefined) return;
+        const text = textOf(block);
+        const n = numberOf(text);
+        if (!n || text.length > 80) return;
+        const depth = n.number.split(".").length;
+        const siblings = used.get(depth);
+        // Numbered the way real headings are (at least two of them), with
+        // a number none of them has.
+        if (
+          !siblings ||
+          siblings.numbers.size < 2 ||
+          siblings.numbers.has(n.number) ||
+          siblings.mark !== n.mark
+        ) {
+          return;
+        }
+        const runs = (block.children ?? []).filter(
+          (node) => node.type === "text" && (node.text ?? "").trim(),
+        );
+        if (!runs.length || !runs.every((node) => node.marks?.bold)) return;
+        found.push({ id: block.id, blockIndex, text, level: depth });
+      });
+      return found;
+    });
+  }
+
+  /**
+   * read/search HTML for a reader to look at, leaving out what goes without
+   * saying: in each paragraph or heading, spacing, line height, keep
+   * settings, and text size and color equal to what its paragraph style
+   * (data-style-id, else the default "Normal") already sets; in table
+   * cells, the default 1px border and 8px padding; and grid columns in
+   * tables with no merged cells. Every value left out is one the block
+   * gets anyway when it's written back without it. Starts with a comment
+   * saying so.
+   */
+  compactHtml(html: string): string {
+    this.assertOpen();
+    const raw = ydocToDocument(this.currentYDoc);
+    type Style = {
+      styleId: string;
+      default?: boolean;
+      paragraphAttrs?: {
+        spaceBefore?: number;
+        spaceAfter?: number;
+        lineSpacing?: number;
+        keepNext?: boolean;
+        keepLines?: boolean;
+      };
+      runMarks?: { fontSize?: number; color?: string };
+    };
+    const styles = (raw.stylesheet?.paragraphStyles ?? []) as Style[];
+    const byId = new Map(styles.map((style) => [style.styleId, style]));
+    const normal = styles.find((style) => style.default);
+    const near = (value: string, want: number | undefined, unit = "") => {
+      if (want === undefined || !value.endsWith(unit)) return false;
+      const n = Number(value.slice(0, value.length - unit.length));
+      return Number.isFinite(n) && Math.abs(n - want) < 0.01;
+    };
+    const sameColor = (value: string, want: string | undefined) =>
+      want !== undefined && value.toLowerCase() === want.toLowerCase();
+    // A tag with the style="" declarations `drop` approves taken out.
+    const restyle = (
+      tag: string,
+      drop: (prop: string, value: string) => boolean,
+    ) =>
+      tag.replace(/ style="([^"]*)"/, (_, style: string) => {
+        const left = style
+          .split(";")
+          .map((d) => d.trim())
+          .filter(Boolean)
+          .filter((d) => {
+            const at = d.indexOf(":");
+            return (
+              at < 0 || !drop(d.slice(0, at).trim(), d.slice(at + 1).trim())
+            );
+          });
+        return left.length ? ` style="${left.join("; ")}"` : "";
+      });
+    let changed = false;
+    let out = html.replace(/<(p|h[1-6])\b[^>]*>[\s\S]*?<\/\1>/g, (block) => {
+      const open = /^<[^>]*>/.exec(block)![0];
+      const id = / data-style-id="([^"]*)"/.exec(open)?.[1];
+      const style = id === undefined ? normal : byId.get(id);
+      if (!style) return block;
+      const attrs = style.paragraphAttrs ?? {};
+      const marks = style.runMarks ?? {};
+      const text = (prop: string, value: string) =>
+        (prop === "font-size" && near(value, marks.fontSize, "px")) ||
+        (prop === "color" && sameColor(value, marks.color));
+      // The parser restores a style's paragraph settings only for headings
+      // and data-style-id paragraphs: a plain paragraph keeps its spacing,
+      // or rewriting it from this HTML would be a formatting change.
+      const styled = id !== undefined || /^<h[1-6]/.test(open);
+      const lean = restyle(
+        open,
+        (prop, value) =>
+          (styled &&
+            ((prop === "margin-top" && near(value, attrs.spaceBefore, "px")) ||
+              (prop === "margin-bottom" &&
+                near(value, attrs.spaceAfter, "px")) ||
+              (prop === "line-height" && near(value, attrs.lineSpacing)) ||
+              (prop === "break-after" &&
+                value === "avoid" &&
+                !!attrs.keepNext) ||
+              (prop === "break-inside" &&
+                value === "avoid" &&
+                !!attrs.keepLines))) ||
+          text(prop, value),
+      );
+      const body = block
+        .slice(open.length)
+        // A span left with no attributes stays: bare text parses
+        // differently (an email address becomes a link).
+        .replace(/<span\b[^>]*>/g, (span) => restyle(span, text));
+      const result = lean + body;
+      if (result !== block) changed = true;
+      return result;
+    });
+    out = out.replace(/<t[dh]\b[^>]*>/g, (td) => {
+      const lean = restyle(
+        td,
+        (prop, value) =>
+          (prop === "border" && value === "1px solid #ccc") ||
+          (prop === "padding" && value === "8px"),
+      );
+      if (lean !== td) changed = true;
+      return lean;
+    });
+    out = out.replace(
+      /<table\b[^>]*>(?:(?!<table\b)[\s\S])*?<\/table>/g,
+      (table) => {
+        if (/ (colspan|rowspan)="/.test(table)) return table;
+        const lean = table.replace(/ data-grid-column="\d+"/g, "");
+        if (lean !== table) changed = true;
+        return lean;
+      },
+    );
+    // data-borders is what a table or cell's borders parse from when it's
+    // there; the CSS borders beside it repeat it for display.
+    out = out.replace(/<(table|t[dh])\b[^>]* data-borders=[^>]*>/g, (tag) => {
+      const lean = restyle(tag, (prop) =>
+        /^border(-(top|right|bottom|left))?$/.test(prop),
+      );
+      if (lean !== tag) changed = true;
+      return lean;
+    });
+    // JSON in an attribute reads better in single quotes than as &quot;.
+    out = out.replace(
+      / ([\w-]+)="([^"]*&quot;[^"]*)"/g,
+      (whole, name: string, value: string) => {
+        if (value.includes("'") || value.includes("&#039;")) return whole;
+        changed = true;
+        return ` ${name}='${value.replace(/&quot;/g, '"')}'`;
+      },
+    );
+    if (!changed) return out;
+    const size = normal?.runMarks?.fontSize;
+    const note = `<!-- Defaults left out: what a block's style sets${size !== undefined ? `, ${size}px text` : ""}, 1px cell borders, 8px cell padding. -->\n`;
+    // Only when it saves more than the note costs.
+    return html.length - out.length > note.length ? note + out : html;
   }
 
   /** Blocks, words, pending changes, and how faithfully it exports to Word. */
@@ -1760,10 +2127,24 @@ function renderView(
   // (accepted) view; show them where they were.
   const deleted = (block: BlockNode | undefined) =>
     block !== undefined && wholeBlockDeletion(block) !== null;
-  let first = Math.min(...known);
-  let last = Math.max(...known);
-  if (blocks.slice(0, first).every((block) => deleted(block))) first = 0;
-  while (last + 1 < blocks.length && deleted(blocks[last + 1])) last += 1;
+  // The blocks the tools showed, each followed by the deleted blocks right
+  // after it; never the blocks between two that were asked for.
+  const shown = new Set<number>();
+  for (const at of known) {
+    shown.add(at);
+    for (
+      let next = at + 1;
+      next < blocks.length && deleted(blocks[next]);
+      next++
+    ) {
+      shown.add(next);
+    }
+  }
+  const first = Math.min(...known);
+  if (blocks.slice(0, first).every((block) => deleted(block))) {
+    for (let at = 0; at < first; at++) shown.add(at);
+  }
+  const order = [...shown].sort((a, b) => a - b);
 
   const changes: string[] = [];
   const indexOf = (id: string) => {
@@ -1803,31 +2184,42 @@ function renderView(
       ? { ...n, children: n.children.map((child) => marked(child, by)) }
       : node;
   };
-  const range = blocks
-    .slice(first, last + 1)
-    .map((block) => marked(block)) as BlockNode[];
-  const doc = { ...raw, children: range, notes: undefined } as typeof raw;
-  const rendered = AgentHtmlConverter.extractSpecificBlocks(
+  // The whole document, so the font every block shares is left out as the
+  // tools leave it out.
+  const children = raw.children.length;
+  const markedBlocks = blocks.map((block) => marked(block)) as BlockNode[];
+  const doc = {
+    ...raw,
+    children: markedBlocks.slice(0, children),
+    notes: raw.notes ? markedBlocks.slice(children) : raw.notes,
+  } as typeof raw;
+  const found = AgentHtmlConverter.extractSpecificBlocks(
     doc,
-    range.map((block) => block.id),
-    undefined,
-    { scanDocumentFontFamily: false },
-  ).foundBlocks.map((block, i) => {
-    const whole = view === "tracked" ? wholeBlockDeletion(range[i]) : null;
+    order.map((at) => blocks[at].id),
+  ).foundBlocks;
+  const lines: string[] = [];
+  found.forEach((block, i) => {
+    const gap = i > 0 ? block.blockIndex - found[i - 1].blockIndex - 1 : 0;
+    if (gap > 0)
+      lines.push(`(${gap} ${gap === 1 ? "block" : "blocks"} omitted...)`);
+    const whole =
+      view === "tracked" ? wholeBlockDeletion(blocks[block.blockIndex]) : null;
     // A deleted block with no text (an image, an empty paragraph) still
     // says so.
-    return whole && !block.html.includes(OPEN)
-      ? block.html.replace(
-          /^<([a-z][\w-]*)/,
-          `<$1 data-change="deleted" data-change-id="${escapeAttr(whole)}" data-author="${escapeAttr(authors.get(whole) ?? "unknown")}"`,
-        )
-      : block.html;
+    lines.push(
+      whole && !block.html.includes(OPEN)
+        ? block.html.replace(
+            /^<([a-z][\w-]*)/,
+            `<$1 data-change="deleted" data-change-id="${escapeAttr(whole)}" data-author="${escapeAttr(authors.get(whole) ?? "unknown")}"`,
+          )
+        : block.html,
+    );
   });
   // The tools head their HTML with "Showing N block(s):"; keep it true.
   const header = /^\s*Showing \d+ block\(s\):\s*/.exec(html)
-    ? `Showing ${rendered.length} block(s):\n\n`
+    ? `Showing ${found.length} block(s):\n\n`
     : "";
-  return (header + rendered.join("\n")).replace(
+  return (header + lines.join("\n")).replace(
     SENTINEL_RUN,
     (_, kind: string, index: string, text: string) => {
       const deletion = kind === DELETED;

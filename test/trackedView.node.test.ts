@@ -177,4 +177,32 @@ describe("views in export and convert", () => {
     expect(await text("original")).toContain("$100");
     expect(await text("accepted")).toContain("$120");
   });
+
+  it("shows only the blocks asked for, with the gaps between them", async () => {
+    const doc = await ReviseDocument.create({
+      html: [1, 2, 3, 4, 5]
+        .map((n) => `<p style="font-family: Georgia">Clause ${n}.</p>`)
+        .join(""),
+    });
+    try {
+      const ids = doc.grep("Clause").map((hit) => hit.id);
+      const result = await doc.tools.run("read_specific_blocks", {
+        block_ids: [ids[0], ids[3]],
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      const html = await doc.viewHtml(
+        result.value.context?.html ?? "",
+        "tracked",
+      );
+      expect(html).toContain("Clause 1.");
+      expect(html).toContain("Clause 4.");
+      expect(html).not.toMatch(/Clause [235]\./);
+      expect(html).toContain("(2 blocks omitted...)");
+      expect(html).toMatch(/^Showing 2 block\(s\):/);
+      // The font every block shares is left out, as the tools leave it out.
+      expect(html).not.toContain("Georgia");
+    } finally {
+      doc.dispose();
+    }
+  });
 });
