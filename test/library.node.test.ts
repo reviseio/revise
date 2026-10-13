@@ -2764,3 +2764,125 @@ describe("revise library", () => {
     ).rejects.toMatchObject({ code: "unsupported_format" });
   });
 });
+
+describe("insert_table_row", () => {
+  it("gives plain-text cells the look of the reference row, not its emphasis", async () => {
+    const cell = (text: string) =>
+      `<td><p style="margin-top: 4px; margin-bottom: 4px; line-height: 1.05; text-align: right"><span style="font-size: 13.33px"><b>${text}</b></span></p></td>`;
+    const doc = await ReviseDocument.create({
+      html: `<table><tr>${cell("Item")}${cell("Fee")}</tr><tr>${cell("Total")}${cell("$10")}</tr></table>`,
+    });
+    try {
+      const raw = () => ydocToDocument(doc.ydoc);
+      const table = raw().children[0] as unknown as {
+        id: string;
+        children: Array<{ id: string }>;
+      };
+      await doc.tools.run("read_specific_blocks", { block_ids: [table.id] });
+      const result = await doc.tools.run("insert_table_row", {
+        tableId: table.id,
+        referenceRowId: table.children[1].id,
+        position: "before",
+        content: ["Support", "<p>$2</p>"],
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      const row = (
+        raw().children[0] as unknown as {
+          children: Array<{
+            children: Array<{
+              children: Array<{
+                type: string;
+                spaceBefore?: number;
+                lineSpacing?: number;
+                align?: string;
+                children: Array<{ marks?: Record<string, unknown> }>;
+              }>;
+            }>;
+          }>;
+        }
+      ).children[1];
+      for (const cellNode of row.children) {
+        const paragraph = cellNode.children[0];
+        expect(paragraph).toMatchObject({
+          type: "paragraph",
+          lineSpacing: 1.05,
+          align: "right",
+        });
+        expect(paragraph.spaceBefore).toBeCloseTo(4, 0);
+        expect(paragraph.children[0].marks?.fontSize).toBeCloseTo(13.33, 1);
+        expect(paragraph.children[0].marks?.bold).toBeUndefined();
+      }
+    } finally {
+      doc.dispose();
+    }
+  });
+});
+
+describe("compactHtml", () => {
+  it("leaves out only what writing the block back restores", async () => {
+    const canon = (value: unknown): unknown =>
+      Array.isArray(value)
+        ? value.map(canon)
+        : value && typeof value === "object"
+          ? Object.fromEntries(
+              Object.keys(value as object)
+                // Ids and change records are new on every write.
+                .filter(
+                  (key) => key !== "id" && !/Record$|CreatedAt$/.test(key),
+                )
+                .sort()
+                .map((key) => [
+                  key,
+                  canon((value as Record<string, unknown>)[key]),
+                ]),
+            )
+          : value;
+    // Each block written back from read HTML, full or compact: the
+    // documents must come out the same.
+    const rewrite = async (compact: boolean) => {
+      const doc = await ReviseDocument.open(
+        fixture("legal-negotiation-before.docx"),
+      );
+      try {
+        await doc.setMode("editing");
+        let full = 0;
+        let lean = 0;
+        for (const block of ydocToDocument(doc.ydoc).children) {
+          const read = await doc.tools.run("read_specific_blocks", {
+            block_ids: [block.id],
+          });
+          if (!read.ok) continue;
+          const html = read.value.context?.html ?? "";
+          const shown = compact ? doc.compactHtml(html) : html;
+          full += html.length;
+          lean += shown.length;
+          const content = shown
+            .split("\n")
+            .filter((line) => line.startsWith("<") && !line.startsWith("<!--"))
+            .join("\n");
+          if (content) {
+            await doc.tools.run("replace_block", {
+              id: block.id,
+              content: [content],
+            });
+          }
+        }
+        return {
+          blocks: JSON.stringify(
+            canon(
+              ydocToDocument(doc.ydoc).children.map((b) => ({ ...b, id: "" })),
+            ),
+          ),
+          full,
+          lean,
+        };
+      } finally {
+        doc.dispose();
+      }
+    };
+    const viaFull = await rewrite(false);
+    const viaCompact = await rewrite(true);
+    expect(viaCompact.blocks).toBe(viaFull.blocks);
+    expect(viaCompact.lean).toBeLessThanOrEqual(viaCompact.full);
+  }, 120_000);
+});

@@ -23,6 +23,7 @@
         "replace-all",
         "replace-text",
         "call",
+        "batch",
         "tools",
         "mode",
         "changes",
@@ -145,6 +146,14 @@
       },
       "then": {
         "$ref": "#/$defs/dataOf-call"
+      }
+    },
+    {
+      "if": {
+        "$ref": "#/$defs/is-batch"
+      },
+      "then": {
+        "$ref": "#/$defs/dataOf-batch"
       }
     },
     {
@@ -805,6 +814,51 @@
       },
       "required": ["data"]
     },
+    "is-batch": {
+      "properties": {
+        "command": {
+          "const": "batch"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": ["data"]
+    },
+    "dataOf-batch": {
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "file",
+            "saved",
+            "checkpoint",
+            "steps",
+            "changeIds",
+            "copiedFrom"
+          ],
+          "properties": {
+            "file": { "$ref": "#/$defs/path" },
+            "saved": { "type": "boolean" },
+            "checkpoint": { "$ref": "#/$defs/count" },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["tool", "message", "changeIds"],
+                "properties": {
+                  "tool": { "type": "string" },
+                  "message": { "type": "string" },
+                  "changeIds": { "$ref": "#/$defs/strings" }
+                }
+              }
+            },
+            "changeIds": { "$ref": "#/$defs/strings" },
+            "copiedFrom": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
     "is-call": {
       "properties": {
         "command": {
@@ -963,6 +1017,19 @@
             },
             "nextOffset": {
               "type": ["integer", "null"]
+            },
+            "unstyledHeadings": {
+              "type": "array",
+              "description": "Paragraphs that look like section headings (short, all bold, numbered like the headings) but are body text.",
+              "items": {
+                "type": "object",
+                "required": ["blockId", "blockIndex", "text"],
+                "properties": {
+                  "blockId": { "type": "string" },
+                  "blockIndex": { "$ref": "#/$defs/count" },
+                  "text": { "type": "string" }
+                }
+              }
             }
           }
         }

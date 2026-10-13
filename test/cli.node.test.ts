@@ -5,6 +5,7 @@
 import { exitWhenFlushed } from "../src/cli/exit";
 import {
   chmodSync,
+  existsSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -100,6 +101,110 @@ describe("revise CLI (file-first)", () => {
     );
     expect((await revise("undo", contract)).code).toBe(0);
     expect(readFileSync(contract).equals(readFileSync(CONTRACT))).toBe(true);
+  });
+
+  it("says how much of the Word file a save rewrote", async () => {
+    const hit = await reviseJson("grep", contract, "terminate without cause");
+    const edit = await revise(
+      "call",
+      contract,
+      "replace",
+      JSON.stringify({
+        id: hit.json.blocks[0].blockId,
+        replacements: [{ find: "thirty days", replace: "ninety days" }],
+      }),
+    );
+    expect(edit.code).toBe(0);
+    expect(edit.stdout).toContain(
+      "Rewrote 1 edited block; the rest of the file is copied byte for byte.",
+    );
+  });
+
+  it("edits several blocks in one replace when each find is unique among the blocks shown", async () => {
+    const draft = path.join(workdir, "two.html");
+    writeFileSync(
+      draft,
+      "<p>The term is 30 days.</p><p>The fee is $10.</p><p>Other text.</p>",
+    );
+    const doc = path.join(workdir, "two.docx");
+    expect((await revise("new", doc, "--content", draft)).code).toBe(0);
+    expect((await revise("mode", doc, "suggest")).code).toBe(0);
+    const input = JSON.stringify({
+      replacements: [
+        { find: "30 days", replace: "60 days", comment: "Longer term." },
+        { find: "$10", replace: "$12" },
+      ],
+    });
+    // Blocks nobody has been shown are not in play.
+    expect((await revise("call", doc, "replace", input)).code).toBe(1);
+    await revise("grep", doc, "term", "fee");
+    const edit = await revise("call", doc, "replace", input);
+    expect(edit.code).toBe(0);
+    expect(edit.stdout).toContain("Rewrote 2 edited blocks");
+    const text = (await reviseJson("diff", doc)).json.text as string;
+    expect(text).toContain("[-30-]{+60+}");
+    expect(text).toContain("[-$10.-]{+$12.+}");
+  });
+
+  it("runs several edits in one batch, and saves none if one fails", async () => {
+    const draft = path.join(workdir, "batch.html");
+    writeFileSync(
+      draft,
+      "<table><tr><th>Item</th><th>Fee</th></tr><tr><td>Total</td><td>$10</td></tr></table><p>Pay within 30 days. Provider bills monthly.</p>",
+    );
+    const doc = path.join(workdir, "batch.docx");
+    expect((await revise("new", doc, "--content", draft)).code).toBe(0);
+    expect((await revise("mode", doc, "suggest")).code).toBe(0);
+    const read = (await reviseJson("read", doc)).json.html as string;
+    const tableId = /<table id="([^"]+)"/.exec(read)![1];
+    const totalRow = /<tr id="([^"]+)"><td[^>]*><p[^>]*>Total/.exec(read)![1];
+    const before = readFileSync(doc);
+    const saves = async () =>
+      ((await reviseJson("history", doc)).json.checkpoints as unknown[]).length;
+    const savesBefore = await saves();
+
+    const bad = await revise(
+      "batch",
+      doc,
+      JSON.stringify([
+        { tool: "replace_all", find: "Provider", replace: "Northstar" },
+        {
+          tool: "replace",
+          id: "nope",
+          replacements: [{ find: "a", replace: "b" }],
+        },
+      ]),
+    );
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toMatch(
+      /Step 2 \(replace\) failed: .*Nothing was saved\./,
+    );
+    expect(readFileSync(doc).equals(before)).toBe(true);
+
+    const good = await reviseJson(
+      "batch",
+      doc,
+      JSON.stringify([
+        {
+          tool: "insert_table_row",
+          tableId,
+          referenceRowId: totalRow,
+          position: "before",
+          content: ["Support", "$2"],
+        },
+        { tool: "replace", replacements: [{ find: "$10", replace: "$12" }] },
+        { tool: "replace_all", find: "Provider", replace: "Northstar" },
+      ]),
+    );
+    expect(good.code).toBe(0);
+    expect(good.json.steps).toHaveLength(3);
+    const after = (await reviseJson("read", doc, "--view", "accepted")).json
+      .html as string;
+    expect(after).toContain("Support");
+    expect(after).toContain("$12");
+    expect(after).toContain("Northstar bills monthly");
+    // One save for the whole batch.
+    expect(await saves()).toBe(savesBefore + 1);
   });
 
   it("re-reads a file that changed outside revise", async () => {
@@ -285,6 +390,125 @@ describe("revise CLI (file-first)", () => {
     await revise("export", redline, accepted);
     await revise("convert", revised, expected);
     expect(readFileSync(accepted, "utf8")).toBe(readFileSync(expected, "utf8"));
+  });
+
+  it("reads a section, a range, or a count of blocks", async () => {
+    const draft = path.join(workdir, "sections.html");
+    writeFileSync(
+      draft,
+      "<h1>1. Scope</h1><p>Scope one.</p><p>Scope two.</p><h1>2. Fees</h1><p>Fees one.</p><h2>2.1 Late fees</h2><p>Late one.</p><h1>3. Term</h1><p>Term one.</p>",
+    );
+    const doc = path.join(workdir, "sections.docx");
+    expect((await revise("new", doc, "--content", draft)).code).toBe(0);
+    const shown = (stdout: string) =>
+      Array.from(stdout.matchAll(/>([^<]+)</g), (m) => m[1].trim()).filter(
+        (t) => t && !/omitted\.\.\.\)$/.test(t),
+      );
+
+    const section = await revise("read", doc, "--section", "2");
+    expect(section.code).toBe(0);
+    expect(shown(section.stdout)).toEqual([
+      "2. Fees",
+      "Fees one.",
+      "2.1 Late fees",
+      "Late one.",
+    ]);
+
+    const outline = await revise("outline", doc);
+    const range = /2\. Fees.*?(\w+\.\.\w+)/.exec(outline.stdout)?.[1];
+    expect(range).toBeTruthy();
+    const byRange = await revise("read", doc, "--blocks", range!);
+    expect(shown(byRange.stdout)).toEqual(shown(section.stdout));
+
+    const counted = await revise("read", doc, "1", "--count", "2");
+    expect(shown(counted.stdout)).toEqual(["Scope one.", "Scope two."]);
+
+    const two = await revise("read", doc, "--section", "1,3");
+    expect(shown(two.stdout)).toEqual([
+      "1. Scope",
+      "Scope one.",
+      "Scope two.",
+      "3. Term",
+      "Term one.",
+    ]);
+
+    const either = await revise("grep", doc, "Late one", "Term one");
+    expect(either.code).toBe(0);
+    expect(either.stdout).toMatch(/Late one\.[\s\S]*Term one\./);
+    expect(either.stdout).toContain("2 matches in 2 blocks.");
+
+    const missing = await revise("read", doc, "--section", "9");
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toMatch(/No heading matches "9"/);
+  });
+
+  it("greps long blocks as the passages around their matches, and stops after a page", async () => {
+    const filler =
+      "Lorem ipsum dolor sit amet consectetur adipiscing elit. ".repeat(12);
+    const paragraphs = Array.from(
+      { length: 45 },
+      (_, i) => `<p>${filler}Clause ${i + 1} sets the fee. ${filler}</p>`,
+    ).join("");
+    const draft = path.join(workdir, "long.html");
+    writeFileSync(draft, paragraphs);
+    const doc = path.join(workdir, "long.docx");
+    expect((await revise("new", doc, "--content", draft)).code).toBe(0);
+
+    const found = await revise("grep", doc, "sets the fee");
+    expect(found.code).toBe(0);
+    const lines = found.stdout.split("\n").filter((l) => /^\w{6}  /.test(l));
+    expect(lines).toHaveLength(40);
+    expect(lines[0]).toMatch(/^\w{6}  ….*Clause 1 sets the fee\..*…$/);
+    expect(lines[0].length).toBeLessThan(260);
+    expect(found.stdout).toContain("… and 5 more blocks.");
+    expect(found.stdout).toContain("45 matches in 45 blocks.");
+    // --json keeps every block, whole.
+    const json = await reviseJson("grep", doc, "sets the fee");
+    expect(json.json.blocks).toHaveLength(45);
+    expect(json.json.blocks[0].text.length).toBeGreaterThan(1000);
+  });
+
+  it("points out a heading typed as bold body text", async () => {
+    const draft = path.join(workdir, "fake-heading.html");
+    writeFileSync(
+      draft,
+      "<h1>1. Scope</h1><p>One.</p><h1>2. Fees</h1><p>Two.</p><p><b>3. Term</b></p><p>Three.</p><h1>4. Notices</h1><p><b>5 days' notice applies to everything in this agreement.</b></p>",
+    );
+    const doc = path.join(workdir, "fake-heading.docx");
+    expect((await revise("new", doc, "--content", draft)).code).toBe(0);
+    const outline = await reviseJson("outline", doc);
+    expect(
+      outline.json.unstyledHeadings.map((u: { text: string }) => u.text),
+    ).toEqual(["3. Term"]);
+    const text = await revise("outline", doc);
+    expect(text.stdout).toContain("Look like headings but are body text");
+    expect(text.stdout).toMatch(/"name":"heading","value":"1"/);
+  });
+
+  it("finds sections past the hundredth", async () => {
+    const draft = path.join(workdir, "many.html");
+    writeFileSync(
+      draft,
+      Array.from(
+        { length: 110 },
+        (_, i) => `<h1>${i + 1}. Part</h1><p>Body ${i + 1}.</p>`,
+      ).join(""),
+    );
+    const doc = path.join(workdir, "many.docx");
+    expect((await revise("new", doc, "--content", draft)).code).toBe(0);
+    const read = await revise("read", doc, "--section", "105");
+    expect(read.code).toBe(0);
+    expect(read.stdout).toContain("Body 105.");
+    const outline = await reviseJson("outline", doc);
+    expect(outline.json.sections).toHaveLength(110);
+    expect(outline.json.nextOffset).toBeNull();
+  });
+
+  it("says how many pages a PDF has, and its paper size", async () => {
+    const pdf = path.join(workdir, "contract.pdf");
+    const exported = await revise("export", contract, pdf);
+    expect(exported.code).toBe(0);
+    expect(exported.stdout).toMatch(/\d+ pages?, (US Letter|A4)/);
   });
 
   it("creates a document in one step and won't export over itself", async () => {
@@ -507,6 +731,23 @@ describe("revise CLI (file-first)", () => {
     expect((await reviseJson("history", redline)).json.checkpoints.length).toBe(
       1,
     );
+
+    // With --out too it still previews, and says where the result would go.
+    const copy = path.join(workdir, "resolved.docx");
+    const dryOut = await revise(
+      "accept",
+      redline,
+      "--except-section",
+      "8",
+      "--out",
+      copy,
+      "--dry-run",
+    );
+    expect(dryOut.code).toBe(0);
+    expect(dryOut.stdout).toContain(
+      `Without --dry-run, the result goes to ${copy}.`,
+    );
+    expect(existsSync(copy)).toBe(false);
 
     await revise("accept", redline, "--except-section", "8");
     const after = (await reviseJson("changes", redline)).json.changes as Array<{

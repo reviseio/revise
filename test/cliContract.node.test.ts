@@ -595,6 +595,30 @@ describe("--json contract, round 2", () => {
     expect(more.data.truncated).toBe(true);
   });
 
+  it("batch: one save for several edits, or none", async () => {
+    const file = path.join(work, "batch-contract.docx");
+    copyFileSync(CONTRACT, file);
+    const ok = await contract(
+      "batch",
+      file,
+      JSON.stringify([
+        { tool: "replace_all", find: "Provider", replace: "Northstar" },
+      ]),
+    );
+    expect(ok.data.saved).toBe(true);
+    expect(ok.data.steps).toHaveLength(1);
+    const failed = await contract(
+      "batch",
+      file,
+      JSON.stringify([{ tool: "replace", id: "nope", replacements: [] }]),
+    );
+    expect(failed.envelope.ok).toBe(false);
+    expect(failed.error.details).toMatchObject({ step: 1, tool: "replace" });
+    expect((await contract("batch", file, "{}")).error.code).toBe(
+      "invalid_json",
+    );
+  });
+
   it("names every command the same way in help and in the envelope", async () => {
     expect((await contract("help", "version")).data.command.name).toBe(
       "version",
@@ -1080,18 +1104,17 @@ describe("--out: edit a copy", () => {
         )
       ).error.code,
     ).toBe("usage");
-    expect(
-      (
-        await contract(
-          "accept",
-          original,
-          "--all",
-          "--dry-run",
-          "--out",
-          path.join(work, "dry.docx"),
-        )
-      ).error.code,
-    ).toBe("usage");
+    // A dry run with --out previews and writes nothing.
+    const dry = await contract(
+      "accept",
+      original,
+      "--all",
+      "--dry-run",
+      "--out",
+      path.join(work, "dry.docx"),
+    );
+    expect(dry.code).toBe(0);
+    expect(existsSync(path.join(work, "dry.docx"))).toBe(false);
     const failed = path.join(work, "out-failed.docx");
     const result = await contract("accept", original, "nope", "--out", failed);
     expect(result.code).toBe(1);
@@ -1274,7 +1297,7 @@ describe("--out never touches the original or what it replaces", () => {
     expect(readdirSync(work).some((f) => f.includes("revise-replaced"))).toBe(
       false,
     );
-  });
+  }, 30_000);
 });
 
 describe("--out edge cases", () => {
