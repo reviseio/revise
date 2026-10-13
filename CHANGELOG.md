@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1.6
+
+### Changed
+
+- **The agent skill knows when revise can't run.** In the Claude and ChatGPT
+  apps, a document attached to the chat lives in a sandbox that can't install
+  revise. The skill now stops before running anything there and offers the
+  Revise app, which opens the document as an editable editor in the chat. If
+  the app is connected, it uses it. Agents with a terminal are unaffected, and
+  an install that fails on a network error is treated the same way instead of
+  being worked around.
+
 ## 3.1.5
 
 Agents finish document tasks in fewer commands. Measured on the revise

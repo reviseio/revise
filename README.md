@@ -1,18 +1,20 @@
 # revise
 
-The swiss army knife for documents
-
 [![](https://img.shields.io/npm/v/revise)](https://www.npmjs.com/package/revise) [![](https://img.shields.io/badge/read_the-docs-blue)](https://revise.io/developer/docs/revise/cli)
+
+The swiss army knife for documents.
 
 Read, edit, and redline Word documents. Available as CLI and TypeScript library.
 
 ```bash
-npx revise
+npm i -g revise
 ```
 
 ## For Agents
 
-AI agents using `revise` can work with Word documents several times faster.
+The `revise` CLI makes AI agents faster and cheaper.
+
+Claude Code and Codex finish the same document tasks about 1.5-2× faster and using 30-70% less usage compared to their default `docx` toolset. See our [benchmarks on GitHub](https://github.com/reviseio/revise/deployments/benchmark).
 
 To get started, tell your agent:
 
@@ -24,14 +26,6 @@ Or install the skill directly from a terminal:
 
 ```bash
 npx -y revise@latest skill install
-```
-
-## Install
-
-You can also just install the `revise` CLI by itself:
-
-```bash
-npm i -g revise
 ```
 
 ## CLI
