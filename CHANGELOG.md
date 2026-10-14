@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.1.7
+
+Released with `@reviseio/editor` 3.1.7, the editor's first release in
+lockstep with revise: one version and one build for all three packages. A
+Y.Doc or .docx moves between the editor and revise unchanged.
+
+### Changed
+
+- **`remove_blocks` takes up to 200 ids** (was 50). Past the limit it removes
+  nothing and says how to proceed: pass a search's `search_result_id` to
+  remove every match, or send the ids in batches.
+
+### Fixed
+
+- **Page numbers next to an existing header or footer.** `set_page_layout`
+  with a page-number position, or a preset that numbers pages (APA puts them
+  top right), used to report success while a hand-authored header or footer
+  kept the number from appearing. The number now goes into that header's or
+  footer's empty zone at the requested side, in the authored text's font. When
+  the zone already holds text or the header already shows a page number, the
+  result says so and lists the headers and footers instead of claiming the
+  layout changed.
+- **A `replace` whose `find` and `replace` are identical** fails with an error
+  that says so, instead of the generic "no changes detected".
+
 ## 3.1.6
 
 ### Changed
