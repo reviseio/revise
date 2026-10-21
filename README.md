@@ -1,14 +1,17 @@
-# revise
+# @reviseio/cli
 
-[![](https://img.shields.io/npm/v/revise)](https://www.npmjs.com/package/revise) [![](https://img.shields.io/badge/read_the-docs-blue)](https://revise.io/developer/docs/revise/cli)
+[![](https://img.shields.io/npm/v/@reviseio/cli)](https://www.npmjs.com/package/@reviseio/cli) [![](https://img.shields.io/badge/read_the-docs-blue)](https://revise.io/developer/docs/revise/cli)
 
 The swiss army knife for documents.
 
 Read, edit, and redline Word documents. Available as CLI and TypeScript library.
 
 ```bash
-npm i -g revise
+npm i -g @reviseio/cli    # installs the `revise` command
+npx @reviseio/cli read contract.docx    # or run it once without installing
 ```
+
+Looking for the React document editor? That's [`revise`](https://www.npmjs.com/package/revise).
 
 ## For Agents
 
@@ -25,7 +28,7 @@ Read https://revise.io/skills/cli.md and follow it.
 Or install the skill directly from a terminal:
 
 ```bash
-npx -y revise@latest skill install
+npx -y @reviseio/cli@latest skill install
 ```
 
 ## CLI
@@ -85,10 +88,10 @@ npx skills add reviseio/skills --skill revise-cli                               
 
 ## Library
 
-`revise` is also available as a [TypeScript library](https://revise.io/developer/docs/revise/library).
+`@reviseio/cli` is also a [TypeScript library](https://revise.io/developer/docs/revise/library).
 
 ```ts
-import { ReviseDocument } from "revise";
+import { ReviseDocument } from "@reviseio/cli";
 
 const doc = await ReviseDocument.open("contract.docx", { author: "Legal bot" });
 await doc.replaceAll("Provider", "Northstar");
@@ -101,7 +104,7 @@ Give the editing tools to a model:
 
 ```ts
 import Anthropic from "@anthropic-ai/sdk";
-import { ReviseDocument, agentTools } from "revise";
+import { ReviseDocument, agentTools } from "@reviseio/cli";
 
 const doc = await ReviseDocument.open("brief.docx");
 const agent = agentTools(doc, { provider: "anthropic" }); // or "openai"
@@ -123,7 +126,7 @@ messages.push(
 Edit a live collaboration room (Y.js):
 
 ```ts
-import { ReviseDocument, seedYDoc } from "revise";
+import { ReviseDocument, seedYDoc } from "@reviseio/cli";
 
 await seedYDoc(room, "contract.docx"); // safe on every connection
 const doc = await ReviseDocument.fromYDoc(room, { author: "Review bot" });
@@ -133,6 +136,6 @@ const { bytes } = await doc.export({ format: "docx" });
 
 ## License
 
-`revise` is available under the MIT License.
+`@reviseio/cli` is available under the MIT License.
 
 [`@reviseio/engine`](https://www.npmjs.com/package/@reviseio/engine) is free for any use under its own license.

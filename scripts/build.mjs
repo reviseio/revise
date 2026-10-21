@@ -153,11 +153,6 @@ await fs.copyFile(
   path.join(root, "src", "cli", "output.schema.json"),
   path.join(dist, "cli-output.schema.json"),
 );
-// revise 2.x was the editor. Its import paths fail with a pointer to
-// @reviseio/editor instead of an opaque "subpath not exported".
-await fs.cp(path.join(root, "legacy"), path.join(dist, "legacy"), {
-  recursive: true,
-});
 
 // The published manifest: this repo's package.json with paths relative to
 // dist/, and without the fields that only matter for developing here.
@@ -182,7 +177,6 @@ for (const [key, value] of Object.entries(manifest)) {
 published.files = [
   "index.js",
   "cli.js",
-  "legacy",
   "cli-output.schema.json",
   "*.d.ts",
   ...(chunks.length > 0 ? ["chunks"] : []),
@@ -247,7 +241,6 @@ async function audit(directory, pkg) {
     /^cli-output\.schema\.json$/,
     /^[\w-]+\.d\.ts$/,
     /^chunks\/[\w.-]+\.js$/,
-    /^legacy\/(editor|server)\.(js|d\.ts)$|^legacy\/style\.css$/,
   ];
   const forbidden = [
     [/\/Users\/[A-Za-z]|\/home\/[a-z][\w-]*\//, "a local home-directory path"],
@@ -302,7 +295,7 @@ async function audit(directory, pkg) {
       `JavaScript totals ${Math.round(javascriptBytes / 1000)} KB: the engine looks bundled in`,
     );
   }
-  if (pkg.name !== "revise") problems.push(`package name is ${pkg.name}`);
+  if (pkg.name !== "@reviseio/cli") problems.push(`package name is ${pkg.name}`);
   if (pkg.license !== "MIT") problems.push("license is not MIT");
   if (!pkg.dependencies?.["@reviseio/engine"]) {
     problems.push("does not depend on @reviseio/engine");

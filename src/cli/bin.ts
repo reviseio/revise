@@ -1,4 +1,4 @@
-/** `npx revise` entry point. */
+/** `revise` command entry point (`npx @reviseio/cli`). */
 import { exitWhenFlushed } from "./exit";
 import { main } from "./main";
 

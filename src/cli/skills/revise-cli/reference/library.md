@@ -2,12 +2,13 @@
 
 Read this when the work is code, not shell commands: a Node script or service
 that edits documents, your own model loop with Revise's editing tools, or a
-collaboration server. The CLI is a shell over this API. ESM only, Node 20+.
+collaboration server. Install `@reviseio/cli` (the same package as the CLI); the
+CLI is a shell over this API. ESM only, Node 20+.
 Full docs: https://revise.io/developer/docs/revise/library.md
 
 ```ts
 import { writeFile } from "node:fs/promises";
-import { ReviseDocument } from "revise";
+import { ReviseDocument } from "@reviseio/cli";
 
 const doc = await ReviseDocument.open("contract.docx", { author: "Legal bot" });
 await doc.replaceAll("Provider", "Northstar"); // tracked changes
@@ -69,7 +70,7 @@ Completions `tool_calls` → `role: "tool"`), `"openai-responses"`
 
 ```ts
 import Anthropic from "@anthropic-ai/sdk";
-import { ReviseDocument, agentTools } from "revise";
+import { ReviseDocument, agentTools } from "@reviseio/cli";
 
 const anthropic = new Anthropic();
 const doc = await ReviseDocument.open("contract.docx", {
@@ -105,7 +106,7 @@ transcript, call `agent.reset()`. Docs: https://revise.io/developer/docs/revise/
 Every Revise document is a Y.js document. On a sync server:
 `seedYDoc(room, "contract.docx")` seeds an empty room (safe on every
 connection); `ReviseDocument.fromYDoc(room, { author })` edits a live room as
-tracked changes that appear in every open `@reviseio/editor`; `export()` downloads
+tracked changes that appear in every open Revise editor (the `revise` package); `export()` downloads
 it. Dispose the ReviseDocument, not the room. Docs:
 https://revise.io/developer/docs/revise/collaboration.md
 

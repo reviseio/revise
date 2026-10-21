@@ -29,8 +29,8 @@ If they say go ahead, do the task without revise.
 
 ## Install
 
-If `revise` isn't found, run `npm i -g revise@latest` (or
-`npx revise`). If npm fails with a network error, you're in a sandbox like
+If `revise` isn't found, run `npm i -g @reviseio/cli@latest` (or
+`npx @reviseio/cli`). If npm fails with a network error, you're in a sandbox like
 that: don't work around the proxy; do as the first section says. If the installed revise is
 newer than this skill, `revise skill` prints the matching guide.
 

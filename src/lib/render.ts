@@ -62,7 +62,7 @@ async function loadCanvasFactory(): Promise<CreateCanvas> {
     }
   }
   throw new ReviseError(
-    `Rendering pages needs a Node canvas. Install one next to revise: npm i @napi-rs/canvas\n(${attempts.join("; ")})`,
+    `Rendering pages needs a Node canvas. Install one next to @reviseio/cli: npm i @napi-rs/canvas\n(${attempts.join("; ")})`,
     "canvas_missing",
   );
 }

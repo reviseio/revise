@@ -610,7 +610,7 @@ export class ReviseDocument {
     return run;
   }
 
-  /** The live document model. Shared with `@reviseio/editor`. */
+  /** The live document model. Shared with the `revise` editor. */
   get ydoc(): Y.Doc {
     return this.currentYDoc;
   }
@@ -648,7 +648,7 @@ export class ReviseDocument {
   }
 
   /** The complete document (versioned; includes the original Word package)
-   * to store or hand to `@reviseio/editor`, as of every operation queued
+   * to store or hand to the `revise` editor, as of every operation queued
    * before this call. Restore with `restore()`. */
   snapshot(): Promise<Uint8Array> {
     return this.serial(() =>

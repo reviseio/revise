@@ -1,10 +1,95 @@
 # Changelog
 
+## 4.0.1
+
+Released with `revise` 4.0.1. No changes to the CLI or library.
+
+## 4.0.0
+
+The CLI and TypeScript library are the `@reviseio/cli` package; the command is
+`revise`. Released with `revise` 4.0.0 (the editor) and `@reviseio/engine`
+4.0.0.
+
+### Added
+
+- **Lists of figures and tables.** `<toc source="captions">` in tool HTML
+  lists figure captions with page numbers; `label="Table"` or any other
+  label collects that kind. A Word `TOC \c "Label"` field in a .docx opens
+  as one and is written back as the same field, and it renders in PDF,
+  Markdown, RTF, and text output.
+- **`join_paragraphs` takes `ranges`.** Up to 100
+  `{ firstId, lastId, separator? }` ranges join runs of consecutive
+  paragraphs, such as PDF line-wrapped text, in one call. If any range is
+  invalid, every problem is reported and nothing changes.
+- **Comment anchors across wrapped lines.** A `leave_comment` anchor or
+  start/end pair whose text continues into the following paragraphs is
+  anchored across them when every spanned block has been read.
+- **Cell borders per edge and padding shorthand** in `style_blocks`
+  (`borderTop`, `borderRight`, `borderBottom`, `borderLeft`; `none` for no
+  border), and `fontVariant: "small-caps"`.
+
+### Changed
+
+- **Install `@reviseio/cli`.** `npm i -g @reviseio/cli` for the command,
+  `npx @reviseio/cli` to run it once, and `@reviseio/cli` for library
+  imports. Remove an earlier global install of `revise` first; see
+  [upgrading](https://revise.io/developer/docs/revise/introduction#upgrade-from-an-earlier-version).
+- **New table rows and columns match their neighbors**
+  (`insert_table_row`, `insert_table_column`): borders, padding, shading,
+  and vertical alignment come from the adjacent cell, rows under a shaded
+  header take the body's formatting, and alternating row shading continues.
+- **`replace_block` keeps paragraph layout.** Alignment, indents, spacing,
+  line height, named style, and direction carry over unless the HTML sets
+  them.
+- **A `replace` find may span paragraphs.** A plain-text `find` with line
+  breaks can match the target block and the paragraphs right after it.
+- **`join_paragraphs` keeps line-end hyphens.** "exam-" + "ple" joins as
+  "exam-ple" when no `separator` is given.
+- **`remove_blocks` needs no read for page breaks and empty paragraphs.**
+  Section breaks and formatted empty paragraphs still do.
+- **Empty numbered items show their number** in `read` output
+  (`data-marker`).
+- **Clearer tool errors** for negative `leftIndent`, indents on list items,
+  and `edit_table_cells` targets inside merged cells.
+
+### Fixed
+
+- **Pending footnotes and endnotes stay with their references** through
+  later edits. An edit that would rebuild a block holding one fails with
+  `pending_footnote_reference` and changes nothing. A footnote reference
+  inside a tracked insertion or deletion in a .docx opens with its note as
+  part of the same pending change.
+- **`replace` no longer rewrites similar paragraphs next to an exact
+  match** in a table or list, and `replace_all` never fuzzy-matches.
+- **Fewer "not fully read" refusals on tables:** inserting next to a partly
+  read table and exact-text `replace` inside one no longer need a full read.
+- **`th` in `style_blocks` selectors** matches only a table's header row
+  when it has one.
+- **Your own edits no longer count as someone else's.** A block restyled by
+  a broad `style_blocks` can be edited next without a re-read, your edits no
+  longer invalidate your other search results, and cells of a row or column
+  you inserted as a suggestion can be filled.
+- **Images in `replace_block`** can become text, and an image replacement
+  keeps the original's settings and takes px width and height.
+- **A `replace` matching an image's alt text** fails with a pointer to
+  `replace_block` instead of reporting success without a change.
+- **`letterSpacing: "normal"`** is accepted.
+- **Web-search citation markers** from OpenAI models are removed from tool
+  arguments.
+- **PDF output** embeds TrueType fonts with spec-conformant dictionaries, so
+  strict PDF readers and printers handle it.
+
+### Security
+
+- **jsPDF 4.2.1.** PDF output is written with a fork of jsPDF 4.2.1
+  (was 3.0.1), which clears the advisories against 3.0.1. The third-party
+  notices list jsPDF and the packages it inlines.
+
 ## 3.1.7
 
-Released with `@reviseio/editor` 3.1.7, the editor's first release in
-lockstep with revise: one version and one build for all three packages. A
-Y.Doc or .docx moves between the editor and revise unchanged.
+Released with the editor 3.1.7: one version and one build for all three
+packages. A Y.Doc or .docx moves between the editor and the library
+unchanged.
 
 ### Changed
 
@@ -187,12 +272,8 @@ liability`.
 
 ## 3.0.0
 
-The first release of `revise` as a command-line tool and TypeScript library
-for reading, editing, and redlining Word documents.
-
-Versions 2.x of this package were the Revise editor for React. The editor is
-now [`@reviseio/editor`](https://www.npmjs.com/package/@reviseio/editor); 2.x
-stays installable.
+The first release of the command-line tool and TypeScript library for
+reading, editing, and redlining Word documents.
 
 ### Added
 
@@ -226,9 +307,3 @@ stays installable.
   cover (styles, numbering, settings).
 - **An agent skill**: `revise skill install` writes a SKILL.md that teaches
   coding agents the CLI.
-
-### Removed
-
-- **The editor entry points of 2.x.** `revise/editor`, `revise/editor/full`,
-  and `revise/server` now throw an error pointing to `@reviseio/editor`, and
-  `revise/style.css` is an empty stylesheet that says the same.
